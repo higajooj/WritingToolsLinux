@@ -140,6 +140,10 @@ class WaylandInputBackend(InputBackend):
         Portal APIs are asynchronous and intentionally optional: systems with
         no GlobalShortcuts implementation still get clipboard-first operation.
         """
+        # The portal requires a desktop entry for this app ID. Install it even
+        # when dbus-next is missing: Qt's own portal registration needs it too.
+        self._entry_error = ensure_desktop_entry()
+
         try:
             from dbus_next import BusType, Message, MessageType
             from dbus_next.aio import MessageBus
@@ -147,9 +151,6 @@ class WaylandInputBackend(InputBackend):
             self._portal_error = "Install dbus-next to enable Wayland global shortcuts."
             logging.warning(self._portal_error)
             return
-
-        # The portal requires a desktop entry for this app ID.
-        self._entry_error = ensure_desktop_entry()
 
         # Re-registering closes the previous portal session.
         self.stop()
