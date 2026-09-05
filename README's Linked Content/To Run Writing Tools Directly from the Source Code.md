@@ -21,6 +21,13 @@ After extracting the folder, open your **Terminal** (or **Command Prompt**) in t
    # Wayland users should also install their compositor's portal backend
    # and wl-clipboard (for Hyprland: xdg-desktop-portal-hyprland).
    ```
+   On Wayland, install the included `com.writingtools.WritingTools.desktop`
+   entry. Replace `/path/to/WritingTools` with your checkout path, then run:
+   ```bash
+   mkdir -p ~/.local/share/applications
+   cp com.writingtools.WritingTools.desktop ~/.local/share/applications/
+   update-desktop-database ~/.local/share/applications 2>/dev/null || true
+   ```
 Of course, you'll need to have [Python installed](https://www.python.org/downloads/)!
 
 **3. Run the Program**

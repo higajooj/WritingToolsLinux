@@ -14,6 +14,8 @@ import time
 
 from PySide6 import QtCore
 
+APP_ID = "com.writingtools.WritingTools"
+
 
 class InputBackend:
     capabilities = {
@@ -99,7 +101,11 @@ class WaylandInputBackend(InputBackend):
                     interface="org.freedesktop.portal.GlobalShortcuts",
                     member="CreateSession",
                     signature="a{sv}",
-                    body=[{"handle_token": Variant("s", "writingtools"), "session_handle_token": Variant("s", "writingtools")}],
+                    body=[{
+                        "handle_token": Variant("s", "writingtools"),
+                        "session_handle_token": Variant("s", "writingtools"),
+                        "app_id": Variant("s", APP_ID),
+                    }],
                 ))
                 if reply.message_type != MessageType.METHOD_RETURN:
                     raise RuntimeError(str(reply.body))

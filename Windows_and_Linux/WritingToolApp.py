@@ -21,7 +21,7 @@ from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from update_checker import UpdateChecker
-from platform_input import WaylandInputBackend, X11InputBackend
+from platform_input import APP_ID, WaylandInputBackend, X11InputBackend
 
 _ = gettext.gettext
 
@@ -51,6 +51,8 @@ class WritingToolApp(QtWidgets.QApplication):
 
     def __init__(self, argv):
         super().__init__(argv)
+        self.setApplicationName("Writing Tools")
+        self.setDesktopFileName(APP_ID)
         self.current_response_window = None
         logging.debug('Initializing WritingToolApp')
         self.output_ready_signal.connect(self.replace_text)
