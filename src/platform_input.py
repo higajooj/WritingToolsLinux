@@ -32,11 +32,15 @@ def desktop_entry_path():
 
 
 def desktop_entry_contents():
-    executable = os.path.abspath(sys.executable)
     if getattr(sys, "frozen", False):
-        exec_line = shlex.quote(executable)
+        # Resolve so Exec= names the same bundle directory the assets come from.
+        exec_line = shlex.quote(os.path.realpath(sys.executable))
     else:
-        exec_line = "{} {}".format(shlex.quote(executable), shlex.quote(str(app_root() / "main.py")))
+        # Keep the interpreter path unresolved: resolving it would escape the venv.
+        exec_line = "{} {}".format(
+            shlex.quote(os.path.abspath(sys.executable)),
+            shlex.quote(str(app_root() / "main.py")),
+        )
     icon = str(asset_root() / "icons" / "app_icon.png")
     lines = [
         "[Desktop Entry]",

@@ -25,8 +25,7 @@ launch, respecting `XDG_DATA_HOME` if set. The entry uses the interpreter and
 checkout that launched it. Existing entries stay unchanged.
 
 After relocating a checkout, update the existing entry's `Exec` and `Icon`
-paths. After updating from the old layout, change the source icon path to
-`assets/icons/app_icon.png`; the launch command stays the same. To install the bundled entry manually, replace its
+paths. To install the bundled entry manually, replace its
 `/path/to/WritingTools` placeholders with your checkout's absolute path, then run:
 
 ```sh

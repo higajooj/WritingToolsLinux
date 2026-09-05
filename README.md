@@ -85,9 +85,8 @@ For source checkouts, update with Git and reinstall dependencies as needed.
 ## Credits
 
 Based on [Writing Tools by Jesai](https://github.com/theJayTea/WritingTools).
-The original project's [media coverage](Media%20Coverage.md) and demo videos
-are retained as historical material. Contributions to this Linux fork belong
-at [WritingToolsLinux](https://github.com/higajooj/WritingToolsLinux).
+Contributions to this Linux fork belong at
+[WritingToolsLinux](https://github.com/higajooj/WritingToolsLinux).
 
 **1. [momokrono](https://github.com/momokrono):**
 

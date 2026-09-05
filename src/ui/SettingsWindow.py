@@ -1,4 +1,3 @@
-from app_paths import asset_root
 import os
 import sys
 
@@ -7,6 +6,7 @@ from PySide6 import QtCore, QtWidgets
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
 
+from app_paths import asset_root
 from ui.UIUtils import UIUtils, colorMode
 
 _ = lambda x: x

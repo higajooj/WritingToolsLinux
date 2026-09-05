@@ -1,4 +1,3 @@
-from app_paths import asset_root, app_root
 import json
 import logging
 import os
@@ -20,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app_paths import app_root, asset_root
 from ui.UIUtils import ThemeBackground, colorMode
 from update_checker import UPDATE_DOWNLOAD_URL
 

@@ -1,13 +1,12 @@
-from app_paths import asset_root
 import logging
 import os
-import sys
 
 import markdown2
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import QScrollArea
 
+from app_paths import asset_root
 from ui.UIUtils import UIUtils, colorMode
 
 _ = lambda x: x

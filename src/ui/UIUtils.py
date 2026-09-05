@@ -1,7 +1,6 @@
-from app_paths import asset_root
 import os
-import sys
 
+from app_paths import asset_root
 from PySide6 import QtGui, QtCore, QtWidgets
 from PySide6.QtGui import QImage, QPixmap
 

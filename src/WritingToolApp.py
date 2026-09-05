@@ -1,4 +1,3 @@
-from app_paths import asset_root, app_root
 import gettext
 import json
 import logging
@@ -21,6 +20,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
+from app_paths import app_root, asset_root
 from update_checker import UpdateChecker
 from platform_input import APP_ID, WaylandInputBackend, X11InputBackend
 

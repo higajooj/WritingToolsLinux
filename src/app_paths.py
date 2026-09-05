@@ -12,6 +12,7 @@ def app_root():
 
 
 def asset_root():
-    """PyInstaller keeps resources beside the executable; source uses assets/."""
-    root = app_root()
-    return root if getattr(sys, "frozen", False) else root / "assets"
+    """PyInstaller unpacks resources to _MEIPASS; source keeps them in assets/."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", app_root()))
+    return app_root() / "assets"
