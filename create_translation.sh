@@ -10,7 +10,10 @@ for file in src/ui/*.py; do
 done
 
 # ... merge them into a single .pot file...
-msgcat pot_files/*.pot -o pot_files/merged.pot
+# The glob must skip the previous merge output, or strings that no longer exist
+# in the source are merged back in and never go obsolete.
+mapfile -t pot_sources < <(find pot_files -maxdepth 1 -name '*.pot' ! -name 'merged.pot' | sort)
+msgcat "${pot_sources[@]}" -o pot_files/merged.pot
 
 # ... and update the .po files with the new strings.
 for locale in assets/locales/*; do

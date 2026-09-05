@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-01-28 19:47+0100\n"
+"POT-Creation-Date: 2026-09-05 16:21-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,42 +17,43 @@ msgstr ""
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: ui/SettingsWindow.py:37 ui/SettingsWindow.py:156 ui/SettingsWindow.py:210
+#: src/ui/SettingsWindow.py:36 src/ui/SettingsWindow.py:157
+#: src/ui/SettingsWindow.py:211
 msgid "Settings"
 msgstr ""
 
-#: ui/SettingsWindow.py:216
-msgid "Start on Boot"
-msgstr ""
-
-#: ui/SettingsWindow.py:223
+#: src/ui/SettingsWindow.py:216
 msgid "Shortcut Key:"
 msgstr ""
 
-#: ui/SettingsWindow.py:238
+#: src/ui/SettingsWindow.py:231
 msgid "Background Theme:"
 msgstr ""
 
-#: ui/SettingsWindow.py:243
+#: src/ui/SettingsWindow.py:236
 msgid "Blurry Gradient"
 msgstr ""
 
-#: ui/SettingsWindow.py:244
+#: src/ui/SettingsWindow.py:237
 msgid "Plain"
 msgstr ""
 
-#: ui/SettingsWindow.py:255
+#: src/ui/SettingsWindow.py:248
 msgid "Choose AI Provider:"
 msgstr ""
 
-#: ui/SettingsWindow.py:312
+#: src/ui/SettingsWindow.py:305
 msgid "Finish AI Setup"
 msgstr ""
 
-#: ui/SettingsWindow.py:312
+#: src/ui/SettingsWindow.py:305
 msgid "Save"
 msgstr ""
 
-#: ui/SettingsWindow.py:331
+#: src/ui/SettingsWindow.py:324
 msgid "Please restart Writing Tools for changes to take effect."
+msgstr ""
+
+#: src/ui/SettingsWindow.py:347
+msgid "Provider setup incomplete"
 msgstr ""

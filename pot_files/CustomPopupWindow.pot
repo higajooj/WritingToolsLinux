@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-01-28 19:47+0100\n"
+"POT-Creation-Date: 2026-09-05 15:53-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,42 +17,6 @@ msgstr ""
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: ui/CustomPopupWindow.py:75
+#: src/ui/CustomPopupWindow.py:509
 msgid "Describe your change..."
-msgstr ""
-
-#: ui/CustomPopupWindow.py:75
-msgid "Ask your AI..."
-msgstr ""
-
-#: ui/CustomPopupWindow.py:109
-msgid "Proofread"
-msgstr ""
-
-#: ui/CustomPopupWindow.py:110
-msgid "Rewrite"
-msgstr ""
-
-#: ui/CustomPopupWindow.py:111
-msgid "Friendly"
-msgstr ""
-
-#: ui/CustomPopupWindow.py:112
-msgid "Professional"
-msgstr ""
-
-#: ui/CustomPopupWindow.py:113
-msgid "Concise"
-msgstr ""
-
-#: ui/CustomPopupWindow.py:114
-msgid "Summary"
-msgstr ""
-
-#: ui/CustomPopupWindow.py:115
-msgid "Key Points"
-msgstr ""
-
-#: ui/CustomPopupWindow.py:116
-msgid "Table"
 msgstr ""

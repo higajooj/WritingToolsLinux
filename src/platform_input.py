@@ -8,10 +8,9 @@ import subprocess
 import sys
 import threading
 
-from app_paths import app_root, asset_root
+from app_paths import APP_ID, app_root, asset_root, data_home
 from PySide6 import QtCore
 
-APP_ID = "com.writingtools.WritingTools"
 PORTAL_BUS = "org.freedesktop.portal.Desktop"
 PORTAL_PATH = "/org/freedesktop/portal/desktop"
 SHORTCUTS_IFACE = "org.freedesktop.portal.GlobalShortcuts"
@@ -36,8 +35,7 @@ def validate_trigger(trigger):
 
 
 def desktop_entry_path():
-    data_home = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
-    return os.path.join(data_home, "applications", APP_ID + ".desktop")
+    return str(data_home() / "applications" / (APP_ID + ".desktop"))
 
 
 def desktop_entry_contents():

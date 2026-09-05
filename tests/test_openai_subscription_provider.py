@@ -3,11 +3,13 @@
 import json
 from pathlib import Path
 import sys
+import threading
 import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from PySide6 import QtCore
 from PySide6.QtWidgets import QApplication, QVBoxLayout
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -25,6 +27,9 @@ class _FakeCodexClient:
             {"model": "gpt-first", "displayName": "GPT First", "hidden": False},
             {"model": "hidden", "displayName": "Hidden", "hidden": True},
         ]]
+        # "repeat" hands back a cursor that never advances; "unique" always
+        # offers another page. Both must terminate.
+        self.model_cursor_mode = None
         self.requests = []
         self.handlers = {}
         self.turns = []
@@ -59,6 +64,11 @@ class _FakeCodexClient:
             self.account = None
             return {}
         if method == "model/list":
+            if self.model_cursor_mode == "repeat":
+                return {"data": [{"model": "gpt-loop"}], "nextCursor": "same"}
+            if self.model_cursor_mode == "unique":
+                calls = len([c for c in self.requests if c[0] == "model/list"])
+                return {"data": [{"model": f"gpt-{calls}"}], "nextCursor": f"c{calls}"}
             page = 1 if params and params.get("cursor") else 0
             data = self.models_pages[page]
             next_cursor = "next" if page + 1 < len(self.models_pages) else None
@@ -228,8 +238,7 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
         self.provider.before_load()
         self.assertTrue(self.client.shutdown_called)
 
-    def test_settings_cannot_activate_provider_before_sign_in(self):
-        self.client.available = False
+    def _settings_window(self):
         self.app.providers = [self.provider]
         self.app.config = {
             "provider": self.provider.provider_name,
@@ -239,12 +248,145 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
         self.app.register_hotkey = Mock()
         window = SettingsWindow(self.app, providers_only=True)
         self.addCleanup(window.deleteLater)
+        return window
+
+    def test_settings_cannot_activate_provider_without_the_codex_cli(self):
+        self.client.available = False
+        window = self._settings_window()
 
         with patch("ui.SettingsWindow.QtWidgets.QMessageBox.warning") as warning:
             window.save_settings()
 
         warning.assert_called_once()
+        self.assertIn("Install", warning.call_args[0][2])
         self.app.save_config.assert_not_called()
+
+    def test_settings_cannot_activate_provider_before_sign_in(self):
+        window = self._settings_window()
+        self.wait_for(lambda: self.provider.auth_state == "signed_out")
+
+        with patch("ui.SettingsWindow.QtWidgets.QMessageBox.warning") as warning:
+            window.save_settings()
+
+        warning.assert_called_once()
+        self.assertIn("Sign in", warning.call_args[0][2])
+        self.app.save_config.assert_not_called()
+
+    def test_settings_wait_for_an_account_probe_that_is_still_running(self):
+        self.provider.ACCOUNT_PROBE_WAIT = 3
+        self.client.account = {"type": "chatgpt", "email": "writer@example.test"}
+        self.provider._refresh_done.clear()
+        self.provider.auth_state = "checking"
+
+        def finish_probe():
+            time.sleep(0.05)
+            self.provider._refresh_account()
+
+        threading.Thread(target=finish_probe, daemon=True).start()
+
+        valid, message = self.provider.validate_settings()
+        self.assertTrue(valid, message)
+
+    def test_settings_stay_saveable_when_the_account_probe_fails(self):
+        # Offline or a transient Codex failure leaves the sign-in state unknown,
+        # not absent. Blocking would strand the user in the Settings dialog.
+        self.provider.auth_state = "error"
+        self.provider.auth_message = "The Codex App Server connection closed."
+
+        valid, message = self.provider.validate_settings()
+        self.assertTrue(valid, message)
+
+    def test_settings_ask_the_user_to_update_an_unsupported_codex(self):
+        self.provider.auth_state = "unsupported"
+
+        valid, message = self.provider.validate_settings()
+        self.assertFalse(valid)
+        # The message box renders plain text, so it must not be HTML-escaped.
+        self.assertEqual(message, self.provider.UNSUPPORTED_MESSAGE)
+        self.assertIn("Update Codex", message)
+
+    def test_cancelling_a_turn_reports_no_error(self):
+        self.client.account = {"type": "chatgpt"}
+
+        def run_turn(**kwargs):
+            kwargs["on_started"]("thread-1", "turn-1")
+            # The hotkey interrupts the turn, and Codex reports the abort.
+            self.provider.cancel()
+            raise CodexTurnError("The Codex turn ended with status: aborted.")
+
+        self.client.run_turn = run_turn
+
+        self.assertEqual(self.provider.get_response("Proofread.", "Text"), "")
+        # cancel() interrupts on a worker thread.
+        self.wait_for(lambda: self.client.interrupts == [("thread-1", "turn-1")])
+        self.app.show_message_signal.emit.assert_not_called()
+        self.app.output_ready_signal.emit.assert_not_called()
+
+    def test_cancelling_drops_a_turn_that_finished_anyway(self):
+        self.client.account = {"type": "chatgpt"}
+
+        def run_turn(**kwargs):
+            kwargs["on_started"]("thread-1", "turn-1")
+            # The interrupt lost the race, but the user still cancelled.
+            self.provider.cancel()
+            return "Edited response"
+
+        self.client.run_turn = run_turn
+
+        self.assertEqual(self.provider.get_response("Proofread.", "Text"), "")
+        self.app.output_ready_signal.emit.assert_not_called()
+
+    def test_a_signed_in_account_is_not_reprobed_before_every_turn(self):
+        self.client.account = {"type": "chatgpt", "email": "writer@example.test"}
+
+        self.provider.get_response("Proofread.", "Text", return_response=True)
+        self.provider.get_response("Proofread.", "More text", return_response=True)
+
+        reads = [call for call in self.client.requests if call[0] == "account/read"]
+        self.assertEqual(len(reads), 1)
+
+    def test_an_unauthorized_turn_forces_the_next_request_to_reprobe(self):
+        self.client.account = {"type": "chatgpt"}
+        self.provider.get_response("Proofread.", "Text", return_response=True)
+
+        self.client.turn_error = CodexTurnError("Session expired", "unauthorized")
+        self.provider.get_response("Proofread.", "Text", return_response=True)
+        self.assertIsNone(self.provider.account)
+
+        self.client.turn_error = None
+        self.provider.get_response("Proofread.", "Text", return_response=True)
+
+        reads = [call for call in self.client.requests if call[0] == "account/read"]
+        self.assertEqual(len(reads), 2)
+
+    def test_model_list_stops_when_the_cursor_never_advances(self):
+        self.client.model_cursor_mode = "repeat"
+
+        self.provider._refresh_models()
+
+        calls = [call for call in self.client.requests if call[0] == "model/list"]
+        self.assertEqual(len(calls), 2)
+
+    def test_model_list_stops_at_the_page_cap(self):
+        self.client.model_cursor_mode = "unique"
+
+        self.provider._refresh_models()
+
+        calls = [call for call in self.client.requests if call[0] == "model/list"]
+        self.assertEqual(len(calls), self.provider.MAX_MODEL_PAGES)
+
+    def test_settings_widget_is_forgotten_once_qt_destroys_it(self):
+        layout = QVBoxLayout()
+        self.addCleanup(layout.deleteLater)
+        self.provider.render_settings(layout, {"model": "gpt-first"})
+        widget = self.provider.settings_widget
+        self.assertIsNotNone(widget)
+
+        widget.setParent(None)
+        widget.deleteLater()
+        QApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+        self.assertIsNone(self.provider.settings_widget)
 
 
 if __name__ == "__main__":

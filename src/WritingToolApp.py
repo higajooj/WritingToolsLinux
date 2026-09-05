@@ -983,7 +983,7 @@ class WritingToolApp(QtWidgets.QApplication):
         self.input_backend.stop()
         for provider in self.providers:
             try:
-                provider.before_load()
+                provider.shutdown()
             except Exception:
                 logging.exception("Failed to shut down provider %s", provider.provider_name)
         logging.debug('Exiting application')
