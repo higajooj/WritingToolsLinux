@@ -8,21 +8,17 @@ import threading
 import time
 
 import darkdetect
-import pyperclip
 import ui.AboutWindow
 import ui.CustomPopupWindow
 import ui.OnboardingWindow
 import ui.ResponseWindow
 import ui.SettingsWindow
 from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
-from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
-from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from app_paths import app_root, asset_root
-from update_checker import UpdateChecker
-from platform_input import APP_ID, WaylandInputBackend, X11InputBackend
+from platform_input import APP_ID, WaylandInputBackend, validate_trigger
 
 _ = gettext.gettext
 
@@ -78,20 +74,15 @@ class WritingToolApp(QtWidgets.QApplication):
         self.registered_hotkey = None
         self.output_queue = ""
         self.last_replace = 0
-        self.hotkey_listener = None
-        self.input_backend = (
-            WaylandInputBackend(self)
-            if sys.platform.startswith('linux') and os.environ.get('XDG_SESSION_TYPE', '').lower() == 'wayland'
-            else X11InputBackend(self, pykeyboard, pyperclip)
-        )
+        self.input_backend = WaylandInputBackend(self)
         self.paused = False
         self.toggle_action = None
 
         # Holder for the user's selected text. Populated asynchronously by a
         # background thread so the popup can show instantly — see `_show_popup`
-        # and `_fire_ctrl_c_and_capture_async`. The lock serializes Ctrl+C
-        # captures across rapid hotkey presses so two captures don't fight
-        # over the clipboard at once.
+        # and `_capture_clipboard_async`. The lock serializes reads across
+        # rapid hotkey presses so two captures don't fight over the clipboard
+        # at once.
         self.current_text_holder = None
         self._capture_lock = threading.Lock()
 
@@ -128,10 +119,6 @@ class WritingToolApp(QtWidgets.QApplication):
             except KeyError:
                 lang = None
             self.change_language(lang)
-
-            # Initialize update checker
-            self.update_checker = UpdateChecker(self)
-            self.update_checker.check_updates_async()
 
         self.recent_triggers = []  # Track recent hotkey triggers
         self.TRIGGER_WINDOW = 1.5  # Time window in seconds
@@ -352,131 +339,53 @@ class WritingToolApp(QtWidgets.QApplication):
         self.onboarding_window.close_signal.connect(self.exit_app)
         self.onboarding_window.show()
 
-    @staticmethod
-    def _to_pynput_hotkey(hotkey_str):
-        """
-        Convert a user-facing hotkey string ('ctrl+j', 'ctrl+alt+space') to
-        pynput's `<ctrl>+j` / `<ctrl>+<alt>+<space>` format. Single-char keys
-        stay as-is; multi-char keys (modifiers, named keys) get wrapped in <>.
-        """
-        return '+'.join(
-            f'{t}' if len(t) <= 1 else f'<{t}>'
-            for t in hotkey_str.split('+')
-        )
-
     def start_hotkey_listener(self):
         """
-        Build a single `GlobalHotKeys` listener that handles both the main
-        Writing Tools shortcut AND any per-button direct hotkeys defined in
-        options.json. Per-button hotkeys fire the corresponding option
-        immediately, skipping the popup.
+        Register the main Writing Tools shortcut and any per-button direct
+        hotkeys from options.json with the Wayland GlobalShortcuts portal.
+        Per-button hotkeys fire the corresponding option immediately, skipping
+        the popup.
 
-        On conflict between a button hotkey and the global shortcut (or
-        between two button hotkeys), the first registration wins and the
-        later one is logged and skipped — the listener can't dispatch to
-        two callbacks for the same combination anyway.
+        Triggers that don't fit the portal's format are logged and skipped. On
+        conflict between a button hotkey and the global shortcut (or between
+        two button hotkeys), the first registration wins and the later one is
+        skipped — the portal can't dispatch one trigger to two shortcut IDs.
         """
         try:
-            if isinstance(self.input_backend, WaylandInputBackend):
-                shortcut_map = {'global': self.config.get('shortcut', 'ctrl+space')}
-                if self.options:
-                    for button_name, button_cfg in self.options.items():
-                        if button_name != 'Custom' and (button_cfg.get('hotkey') or '').strip():
-                            shortcut_map['button:' + button_name] = button_cfg['hotkey'].strip()
-                callbacks = {k: k for k in shortcut_map}
-                self.input_backend.set_callbacks(callbacks)
-                self.registered_hotkey = None
-                self.input_backend.register(shortcut_map)
-                return
-            if self.hotkey_listener is not None:
-                self.hotkey_listener.stop()
-                self.hotkey_listener = None
+            global_shortcut = self.config.get('shortcut', 'ctrl+space')
+            shortcut_map = {'global': global_shortcut}
+            taken = {global_shortcut.strip().lower()}
 
-            hotkey_map = {}
-
-            # --- Global Writing Tools hotkey ----------------------------------
-            orig_shortcut = self.config.get('shortcut', 'ctrl+space')
-            self.registered_hotkey = orig_shortcut
-            try:
-                global_parsed = self._to_pynput_hotkey(orig_shortcut)
-                # Validate by parsing — raises if malformed.
-                pykeyboard.HotKey.parse(global_parsed)
-
-                def on_global_activate():
-                    if self.paused:
-                        return
-                    logging.debug('triggered global hotkey')
-                    self.hotkey_triggered_signal.emit()
-
-                hotkey_map[global_parsed] = on_global_activate
-                logging.debug(f'Registered global hotkey: {global_parsed}')
-            except Exception as e:
-                logging.error(f'Failed to parse global hotkey "{orig_shortcut}": {e}')
-
-            # --- Per-button direct hotkeys ------------------------------------
             # Custom is excluded — it needs a typed instruction from the user,
             # so a "fire directly" hotkey doesn't make sense for it.
             if self.options:
                 for button_name, button_cfg in self.options.items():
                     if button_name == 'Custom':
                         continue
-                    raw = (button_cfg.get('hotkey') or '').strip()
-                    if not raw:
+                    trigger = (button_cfg.get('hotkey') or '').strip()
+                    if not trigger:
                         continue
-                    try:
-                        parsed = self._to_pynput_hotkey(raw)
-                        # Same validation path as the global shortcut.
-                        pykeyboard.HotKey.parse(parsed)
-                    except Exception as e:
+                    ok, problem = validate_trigger(trigger)
+                    if not ok:
                         logging.error(
-                            f'Invalid hotkey "{raw}" for button "{button_name}": {e}'
+                            f'Invalid hotkey "{trigger}" for button "{button_name}": {problem}'
                         )
                         continue
-                    if parsed in hotkey_map:
+                    if trigger.lower() in taken:
                         logging.warning(
-                            f'Hotkey "{raw}" for button "{button_name}" '
+                            f'Hotkey "{trigger}" for button "{button_name}" '
                             f'conflicts with an already-registered binding; skipping'
                         )
                         continue
-                    hotkey_map[parsed] = self._make_button_hotkey_callback(button_name)
-                    logging.debug(f'Registered button hotkey: {parsed} -> {button_name}')
+                    taken.add(trigger.lower())
+                    shortcut_map['button:' + button_name] = trigger
+                    logging.debug(f'Registering button hotkey: {trigger} -> {button_name}')
 
-            if not hotkey_map:
-                logging.warning('No hotkeys to register')
-                return
-
-            self.hotkey_listener = pykeyboard.GlobalHotKeys(hotkey_map)
-            self.hotkey_listener.start()
+            self.input_backend.set_callbacks({k: k for k in shortcut_map})
+            self.registered_hotkey = None
+            self.input_backend.register(shortcut_map)
         except Exception as e:
-            logging.error(f'Failed to register hotkey listener: {e}')
-
-    def _make_button_hotkey_callback(self, button_name):
-        """
-        Build a callback that fires `button_name` directly, bypassing the
-        popup. Closes over `button_name` so we can register many distinct
-        callbacks in a single GlobalHotKeys map.
-
-        The actual fire is bounced through the Qt event loop because pynput
-        invokes callbacks on its listener thread; popup/clipboard work needs
-        to happen on the main thread.
-        """
-        def callback():
-            if self.paused:
-                return
-            logging.debug(f'Direct hotkey fired for button "{button_name}"')
-            # Match the global hotkey's behaviour: cancel any in-flight
-            # request so a new fire doesn't pile up on top of a previous one.
-            if self.current_provider:
-                self.current_provider.cancel()
-                self.output_queue = ""
-            # noinspection PyTypeChecker
-            QtCore.QMetaObject.invokeMethod(
-                self,
-                "_fire_button_directly",
-                QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, button_name)
-            )
-        return callback
+            logging.error(f'Failed to register global shortcuts: {e}')
 
     @Slot(str)
     def _fire_button_directly(self, button_name):
@@ -502,7 +411,7 @@ class WritingToolApp(QtWidgets.QApplication):
             return
 
         self.current_text_holder = _SelectedTextHolder()
-        self._fire_ctrl_c_and_capture_async(self.current_text_holder)
+        self._capture_clipboard_async(self.current_text_holder)
 
         # Same worker path as a popup-button click. process_option_thread
         # waits on the holder, surfaces "Please select text…" if empty,
@@ -518,10 +427,21 @@ class WritingToolApp(QtWidgets.QApplication):
 
     @Slot(str)
     def handle_backend_shortcut(self, shortcut_id):
-        """Dispatch an activated Wayland portal shortcut on the Qt thread."""
+        """Dispatch an activated portal shortcut on the Qt thread.
+
+        Every shortcut arrives here, so this is where Pause is honoured.
+        """
+        if self.paused:
+            logging.debug(f'Paused; ignoring shortcut "{shortcut_id}"')
+            return
         if shortcut_id == 'global':
             self.on_hotkey_pressed()
         elif shortcut_id.startswith('button:'):
+            # Match the global shortcut's behaviour: cancel any in-flight
+            # request so a new fire doesn't pile up on top of a previous one.
+            if self.current_provider:
+                self.current_provider.cancel()
+                self.output_queue = ""
             self._fire_button_directly(shortcut_id[7:])
 
     def register_hotkey(self):
@@ -567,11 +487,10 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         logging.debug('Showing popup window')
 
-        # Fresh holder per popup. Fire Ctrl+C *before* we create the popup
-        # so the keystroke is queued while focus is still on the user's
-        # source app — the actual clipboard read happens in the background.
+        # Fresh holder per popup. The clipboard read happens in the
+        # background so the popup shows without waiting on wl-paste.
         self.current_text_holder = _SelectedTextHolder()
-        self._fire_ctrl_c_and_capture_async(self.current_text_holder)
+        self._capture_clipboard_async(self.current_text_holder)
 
         try:
             if self.popup_window is not None:
@@ -589,116 +508,39 @@ class WritingToolApp(QtWidgets.QApplication):
             # Set the window icon
             icon_path = os.path.join(asset_root(), 'icons', 'app_icon.png')
             if os.path.exists(icon_path): self.setWindowIcon(QtGui.QIcon(icon_path))
-            # Get the screen containing the cursor
-            cursor_pos = QCursor.pos()
-            screen = QGuiApplication.screenAt(cursor_pos)
-            if screen is None:
-                screen = QGuiApplication.primaryScreen()
-            screen_geometry = screen.geometry()
-            logging.debug(f'Cursor is on screen: {screen.name()}')
-            logging.debug(f'Screen geometry: {screen_geometry}')
-            # Show the popup to get its size
+            # Show the popup
             self.popup_window.show()
             self.popup_window.adjustSize()
             # Ensure the popup it's focused, even on lower-end machines
             self.popup_window.activateWindow()
             QtCore.QTimer.singleShot(100, self.popup_window.custom_input.setFocus)
 
-            popup_width = self.popup_window.width()
-            popup_height = self.popup_window.height()
-            # Calculate position
-            x = cursor_pos.x()
-            y = cursor_pos.y() + 20  # 20 pixels below cursor
-            # Adjust if the popup would go off the right edge of the screen
-            if x + popup_width > screen_geometry.right():
-                x = screen_geometry.right() - popup_width
-            # Adjust if the popup would go off the bottom edge of the screen
-            if y + popup_height > screen_geometry.bottom():
-                y = cursor_pos.y() - popup_height - 10  # 10 pixels above cursor
-            if isinstance(self.input_backend, WaylandInputBackend):
-                # Wayland clients cannot position their own toplevels, so move()
-                # silently does nothing here. Placement is the compositor's job:
-                # see the float/move window rule documented for Hyprland.
-                logging.debug('Wayland: leaving popup placement to the compositor')
-            else:
-                self.popup_window.move(x, y)
-                logging.debug(f'Popup window moved to position: ({x}, {y})')
+            # Wayland clients cannot position their own toplevels, so move()
+            # silently does nothing here. Placement is the compositor's job:
+            # see the float/move window rule documented for Hyprland.
+            logging.debug('Leaving popup placement to the compositor')
         except Exception as e:
             logging.error(f'Error showing popup window: {e}', exc_info=True)
 
-    def _fire_ctrl_c_and_capture_async(self, holder):
+    def _capture_clipboard_async(self, holder):
         """
-        Inject Ctrl+C now (must happen while focus is still on the user's
-        source app, before the popup is shown), then poll the clipboard
-        for the result in a background thread. Returns immediately so the
-        popup can display with no perceptible delay.
+        Read the clipboard in a background thread so the popup can display
+        with no perceptible delay.
 
-        Slow systems' clipboard subsystems can take a while to populate
-        after Ctrl+C — that's the whole reason this is async. The polling
-        timeout is generous; an empty result after timeout means the user
-        pressed the hotkey without actually selecting anything, which
-        `process_option_thread` reports as a normal error.
+        Nothing injects Ctrl+C: Wayland gives no way to copy the focused
+        application's selection, so the user copies before invoking Writing
+        Tools. An empty result is reported by `process_option_thread` as a
+        normal error telling them to do exactly that.
         """
-        if isinstance(self.input_backend, WaylandInputBackend):
-            def _read_wayland_clipboard():
-                with self._capture_lock:
-                    holder.text = self.input_backend.read_clipboard()
-                    holder.ready.set()
-            threading.Thread(target=_read_wayland_clipboard, daemon=True).start()
-            return
-
-        try:
-            clipboard_backup = pyperclip.paste()
-        except Exception:
-            clipboard_backup = ''
-
-        self.clear_clipboard()
-
-        kbrd = pykeyboard.Controller()
-        try:
-            kbrd.press(pykeyboard.Key.ctrl.value)
-            kbrd.press('c')
-            kbrd.release('c')
-            kbrd.release(pykeyboard.Key.ctrl.value)
-        except Exception as e:
-            logging.error(f'Error simulating Ctrl+C: {e}')
-
-        def _poll_clipboard():
+        def read():
             # Lock so concurrent hotkey presses don't trample each other's
             # in-flight captures.
             with self._capture_lock:
-                text = ''
-                try:
-                    deadline = time.time() + 2.0
-                    while time.time() < deadline:
-                        try:
-                            text = pyperclip.paste() or ''
-                        except Exception as e:
-                            logging.error(f'Error reading clipboard during poll: {e}')
-                            text = ''
-                        if text:
-                            break
-                        time.sleep(0.05)
-                    holder.text = text
-                    logging.debug(f'Captured selected text (len={len(text)})')
-                finally:
-                    try:
-                        pyperclip.copy(clipboard_backup)
-                    except Exception as e:
-                        logging.error(f'Error restoring clipboard: {e}')
-                    holder.ready.set()
+                holder.text = self.input_backend.read_clipboard()
+                logging.debug(f'Captured clipboard text (len={len(holder.text)})')
+                holder.ready.set()
 
-        threading.Thread(target=_poll_clipboard, daemon=True).start()
-
-    @staticmethod
-    def clear_clipboard():
-        """
-        Clear the system clipboard.
-        """
-        try:
-            pyperclip.copy('')
-        except Exception as e:
-            logging.error(f'Error clearing clipboard: {e}')
+        threading.Thread(target=read, daemon=True).start()
 
     def process_option(self, option, custom_change=None):
         """
@@ -874,9 +716,10 @@ class WritingToolApp(QtWidgets.QApplication):
                     
                     pasted = self.input_backend.paste()
                     time.sleep(0.2)
-                    # Keep the generated result available when Wayland cannot
-                    # inject Ctrl+V; X11 restores the user's original clipboard.
-                    if pasted or not isinstance(self.input_backend, WaylandInputBackend):
+                    # Keep the generated result on the clipboard when the
+                    # compositor cannot inject Ctrl+V, so the user can paste
+                    # it themselves.
+                    if pasted:
                         self.input_backend.write_clipboard(clipboard_backup)
 
                 if not hasattr(self, 'current_response_window'):
@@ -1152,8 +995,6 @@ class WritingToolApp(QtWidgets.QApplication):
         Exit the application.
         """
         logging.debug('Stopping the listener')
-        if self.hotkey_listener is not None:
-            self.hotkey_listener.stop()
         self.input_backend.stop()
         logging.debug('Exiting application')
         self.quit()

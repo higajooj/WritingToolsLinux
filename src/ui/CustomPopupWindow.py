@@ -4,7 +4,6 @@ import os
 import sys
 from functools import partial
 
-from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -20,8 +19,8 @@ from PySide6.QtWidgets import (
 )
 
 from app_paths import app_root, asset_root
+from platform_input import validate_trigger
 from ui.UIUtils import ThemeBackground, colorMode
-from update_checker import UPDATE_DOWNLOAD_URL
 
 _ = lambda x: x
 
@@ -395,10 +394,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
     def init_ui(self):
         logging.debug('Setting up CustomPopupWindow UI')
-        # Qt.Tool marks this as a utility window (_NET_WM_WINDOW_TYPE_UTILITY on
-        # X11), which is enough for most WMs to float it. Wayland has no such
-        # hint -- the popup is a plain xdg_toplevel there, so compositors need a
-        # float rule instead; see the Hyprland notes in the run-from-source doc.
+        # Wayland has no utility-window hint -- the popup is a plain
+        # xdg_toplevel, so the compositor needs a float rule of its own; see
+        # the Hyprland notes in the run-from-source doc.
         self.setWindowFlags(QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle("Writing Tools")
@@ -550,14 +548,6 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.build_buttons_list()
         self.rebuild_grid_layout(content_layout)
 
-        # show update notice if applicable
-        if self.app.config.get("update_available", False):
-            update_label = QLabel()
-            update_label.setOpenExternalLinks(True)
-            update_label.setText(f'<a href="{UPDATE_DOWNLOAD_URL}" style="color:rgb(255, 0, 0); text-decoration: underline; font-weight: bold;">There\'s an update! :D Download now.</a>')
-            update_label.setStyleSheet("margin-top: 10px;")
-            content_layout.addWidget(update_label, alignment=QtCore.Qt.AlignCenter)
-        
         logging.debug('CustomPopupWindow UI setup complete')
         QtCore.QTimer.singleShot(250, lambda: self.custom_input.setFocus())
 
@@ -843,16 +833,14 @@ class CustomPopupWindow(QtWidgets.QWidget):
         if not hotkey:
             return True, None
 
-        # Authoritative format check: try parsing it the same way the
-        # listener will. Catches typos, unknown key names, missing
-        # modifiers, etc. without us having to maintain a regex.
-        try:
-            pykeyboard.HotKey.parse(self.app._to_pynput_hotkey(hotkey))
-        except Exception as e:
+        # Authoritative format check: the same one the portal registration
+        # applies, so anything accepted here can actually be bound.
+        ok, problem = validate_trigger(hotkey)
+        if not ok:
             return False, (
                 f"'{hotkey}' isn't a valid hotkey.\n\n"
                 f"Use '+' between keys, e.g. ctrl+j or ctrl+shift+p.\n"
-                f"({e})"
+                f"({problem})"
             )
 
         # Conflict with the global Writing Tools shortcut. Same combination

@@ -1,8 +1,9 @@
-"""Platform input and clipboard adapters.
+"""Wayland input and clipboard adapter.
 
 Wayland intentionally does not expose the X11 global input APIs.  This module
-keeps those details out of the application workflow and provides a graceful
-clipboard-first path when a compositor cannot inject input.
+keeps the portal, clipboard, and compositor details out of the application
+workflow and provides a graceful clipboard-first path when a compositor cannot
+inject input.
 """
 
 import logging
@@ -26,21 +27,37 @@ MODIFIER_NAMES = {
 }
 
 
+def validate_trigger(trigger):
+    """Check a user-typed shortcut against the portal's trigger format.
+
+    Returns `(ok, message)`; `message` is empty when `ok`. The portal wants at
+    least one modifier and exactly one key, so `space` alone or `ctrl+a+b` are
+    both rejected before they reach BindShortcuts, where a bad trigger would
+    only surface as a silent bind failure.
+    """
+    parts = [part.strip() for part in (trigger or "").split("+")]
+    if not parts or any(not part for part in parts):
+        return False, "Use '+' between keys with nothing empty, e.g. ctrl+space."
+    modifiers = [part for part in parts if part.lower() in MODIFIER_NAMES]
+    keys = [part for part in parts if part.lower() not in MODIFIER_NAMES]
+    if not modifiers:
+        return False, "Add a modifier (ctrl, alt, shift, or super), e.g. ctrl+space."
+    if len(keys) != 1:
+        return False, "Use exactly one key after the modifiers, e.g. super+p."
+    return True, ""
+
+
 def desktop_entry_path():
     data_home = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
     return os.path.join(data_home, "applications", APP_ID + ".desktop")
 
 
 def desktop_entry_contents():
-    if getattr(sys, "frozen", False):
-        # Resolve so Exec= names the same bundle directory the assets come from.
-        exec_line = shlex.quote(os.path.realpath(sys.executable))
-    else:
-        # Keep the interpreter path unresolved: resolving it would escape the venv.
-        exec_line = "{} {}".format(
-            shlex.quote(os.path.abspath(sys.executable)),
-            shlex.quote(str(app_root() / "main.py")),
-        )
+    # Keep the interpreter path unresolved: resolving it would escape the venv.
+    exec_line = "{} {}".format(
+        shlex.quote(os.path.abspath(sys.executable)),
+        shlex.quote(str(app_root() / "main.py")),
+    )
     icon = str(asset_root() / "icons" / "app_icon.png")
     lines = [
         "[Desktop Entry]",
@@ -58,8 +75,7 @@ def desktop_entry_contents():
 def ensure_desktop_entry():
     """Create the desktop entry required by the portal.
 
-    Keep an existing user or packaged entry. Return an error message if
-    creation fails.
+    Keep an existing user entry. Return an error message if creation fails.
     """
     path = desktop_entry_path()
     if os.path.exists(path):
@@ -76,44 +92,11 @@ def ensure_desktop_entry():
     return ""
 
 
-class InputBackend:
-    capabilities = {
-        "global_shortcuts": False,
-        "automatic_selection_capture": False,
-        "automatic_paste": False,
-    }
-
-    def __init__(self, app):
-        self.app = app
-
-    def register(self, shortcut_map):
-        raise NotImplementedError
-
-    def stop(self):
-        pass
-
-    def capture_selected_text(self, holder):
-        """Capture selected text, setting holder.text and holder.ready."""
-        holder.ready.set()
-
-    def read_clipboard(self):
-        raise NotImplementedError
-
-    def write_clipboard(self, text):
-        raise NotImplementedError
-
-    def paste(self):
-        return False
-
-    def diagnostics(self):
-        return ""
-
-
-class WaylandInputBackend(InputBackend):
+class WaylandInputBackend:
     """Wayland clipboard backend with optional Hyprland paste injection."""
 
     def __init__(self, app):
-        super().__init__(app)
+        self.app = app
         self._portal_bus = None
         self._portal_session = None
         self._portal_thread = None
@@ -433,32 +416,3 @@ class WaylandInputBackend(InputBackend):
         if not self._has_hyprctl:
             problems.append("Automatic paste is unavailable outside Hyprland; paste the result manually.")
         return " ".join(problems)
-
-class X11InputBackend(InputBackend):
-    """Adapter for the existing pynput/pyperclip implementation."""
-
-    def __init__(self, app, keyboard, clipboard):
-        super().__init__(app)
-        self.keyboard = keyboard
-        self.clipboard = clipboard
-        self.capabilities = {
-            "global_shortcuts": True,
-            "automatic_selection_capture": True,
-            "automatic_paste": True,
-            "clipboard": True,
-        }
-
-    def read_clipboard(self):
-        return self.clipboard.paste()
-
-    def write_clipboard(self, text):
-        self.clipboard.copy(text)
-        return True
-
-    def paste(self):
-        keyboard = self.keyboard.Controller()
-        keyboard.press(self.keyboard.Key.ctrl.value)
-        keyboard.press("v")
-        keyboard.release("v")
-        keyboard.release(self.keyboard.Key.ctrl.value)
-        return True

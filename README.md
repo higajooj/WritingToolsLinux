@@ -1,13 +1,14 @@
 # Writing Tools for Linux
 
-A system-wide AI writing assistant for Linux, written in Python with PySide6.
-Select text and use a shortcut to proofread, rewrite, change tone, summarize,
+A system-wide AI writing assistant for Wayland, written in Python with PySide6.
+Copy some text and use a shortcut to proofread, rewrite, change tone, summarize,
 or apply custom instructions. Providers include Gemini, Ollama, and
 OpenAI-compatible servers.
 
-This repository maintains the Linux application as its only version. Application
-code lives in `src/`, bundled images and translations in `assets/`, and tests
-in `tests/`. The root `main.py` remains the source launcher.
+Linux on Wayland is the only supported platform. There is no X11 or Windows
+code path, and no packaged build — the app runs from a checkout with
+`python main.py`. Application code lives in `src/`, images and translations in
+`assets/`, and tests in `tests/`.
 
 ## Run
 
@@ -18,17 +19,19 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-Configure your provider in the initial setup or Settings. The default shortcut
-is `ctrl+space`; change it if it conflicts with another application.
+You also need `wl-clipboard`, `xdg-desktop-portal`, and the portal backend for
+your compositor (for Hyprland: `xdg-desktop-portal-hyprland`).
 
-X11 uses pynput. Wayland uses desktop portals and requires your compositor's
-portal backend plus `wl-clipboard`. See the
+Configure your provider in the initial setup or Settings. The default shortcut
+is `ctrl+space`; change it if it conflicts with another application. Global
+shortcuts go through the desktop portal, so wlroots compositors also need a
+binding in their own config. See the
 [source and desktop setup guide](README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
-for dependencies, desktop launchers, and Hyprland bindings.
+for the portal bindings and the window rules that float the popup.
 
 ## Features and configuration
 
-- Proofread, rewrite, adjust tone, or describe a custom change.
+- Proofread, rewrite, adjust tone, or describe a custom change on the copied text.
 - Summaries, key points, and tables in a response window with Markdown rendering.
 - Custom buttons and shortcuts in `options.json`.
 - Light/dark appearance and gradient/plain themes.
@@ -67,7 +70,7 @@ If requests return HTTP 404, check that the proxy was started with `CCP_CODEX_RE
 Known proxy limitation: with claude-code-proxy 0.1.35 and the Codex backend, follow-up chat can fail with `Invalid value: 'input_text'`. The proxy translates assistant history into the wrong upstream content type. Single-request writing actions work; follow-up chat requires a fix in the proxy.
 
 
-## Development and builds
+## Development
 
 Run the tests from the repository root:
 
@@ -75,12 +78,8 @@ Run the tests from the repository root:
 QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
 ```
 
-See the [Linux build guide](README's%20Linked%20Content/To%20Compile%20the%20Application%20Yourself.md)
-for a self-contained PyInstaller distribution.
-
-Update checks read this fork's root-level `Latest_Version_for_Update_Check.txt`
-and link to [this fork's releases](https://github.com/higajooj/WritingToolsLinux/releases).
-For source checkouts, update with Git and reinstall dependencies as needed.
+Update with `git pull`, then reinstall dependencies if `requirements.txt`
+changed. There is no packaged build and no in-app update check.
 
 ## Credits
 

@@ -1,5 +1,4 @@
 import os
-import sys
 
 from aiprovider import AIProvider
 from PySide6 import QtCore, QtWidgets
@@ -225,14 +224,6 @@ class SettingsWindow(QtWidgets.QWidget):
                 border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
             """)
             content_layout.addWidget(self.shortcut_input)
-
-            if sys.platform.startswith('linux') and hasattr(self.app, 'input_backend'):
-                backend = self.app.input_backend
-                mode = 'Wayland' if backend.__class__.__name__.startswith('Wayland') else 'X11'
-                status = QtWidgets.QLabel(_(f'Input backend: {mode}'))
-                status.setStyleSheet(f"font-size: 13px; color: {'#bbbbbb' if colorMode == 'dark' else '#666666'};")
-                status.setWordWrap(True)
-                content_layout.addWidget(status)
 
             # Add theme selection
             theme_label = QtWidgets.QLabel(_("Background Theme:"))

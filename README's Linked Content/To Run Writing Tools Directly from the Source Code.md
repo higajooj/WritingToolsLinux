@@ -1,4 +1,4 @@
-# Run Writing Tools on Linux
+# Run Writing Tools on Wayland
 
 From the repository root, create a virtual environment and install dependencies:
 
@@ -16,32 +16,26 @@ Application code lives in `src/`; icons, backgrounds, and translations live in
 
 ## Desktop integration
 
-On Wayland, install `wl-clipboard`, `xdg-desktop-portal`, and the portal backend
-for your desktop (for Hyprland: `xdg-desktop-portal-hyprland`).
+Install `wl-clipboard`, `xdg-desktop-portal`, and the portal backend for your
+compositor (for Hyprland: `xdg-desktop-portal-hyprland`).
 
 Writing Tools creates
 `~/.local/share/applications/com.writingtools.WritingTools.desktop` on first
 launch, respecting `XDG_DATA_HOME` if set. The entry uses the interpreter and
-checkout that launched it. Existing entries stay unchanged.
+checkout that launched it. Existing entries stay unchanged. This is not
+optional decoration: the GlobalShortcuts portal will not bind shortcuts for an
+app ID with no desktop entry.
 
 After relocating a checkout, update the existing entry's `Exec` and `Icon`
-paths. To install the bundled entry manually, replace its
-`/path/to/WritingTools` placeholders with your checkout's absolute path, then run:
-
-```sh
-mkdir -p ~/.local/share/applications
-cp com.writingtools.WritingTools.desktop ~/.local/share/applications/
-update-desktop-database ~/.local/share/applications
-```
+paths, or delete it and relaunch to have a fresh one written.
 
 ## Shortcuts
 
-On X11, Writing Tools uses pynput for global shortcuts, selection capture,
-and pasting. Change the shortcut in Settings if another application uses it.
-
-On Wayland, shortcut registration uses the desktop portal. Automatic selection
-capture and pasting depend on compositor support; use the clipboard when these
-are unavailable.
+Shortcut registration goes through the desktop portal. There is no selection
+capture — Wayland gives no way to read another application's selection — so
+copy the text you want before invoking Writing Tools. Pasting the result back
+depends on compositor support; where it is unavailable the result is left on
+the clipboard for you to paste.
 
 GNOME and KDE use the shortcut requested through the portal. wlroots
 compositors require a binding in their own configuration. Writing Tools
@@ -61,13 +55,11 @@ for portal registration failures.
 
 ## Floating the popup
 
-The shortcut popup is a frameless top-level window. On X11 it carries the
-`Qt.Tool` hint, so window managers float it without further configuration.
-
-Wayland has no equivalent hint, and a Wayland client cannot position its own
-window either. Under a tiling compositor the popup is therefore tiled like any
-other window and lands wherever the layout puts it, rather than next to the
-cursor. Both are fixed with one compositor rule matching the popup's app ID
+The shortcut popup is a frameless top-level window. Wayland has no
+utility-window hint, and a Wayland client cannot position its own window
+either. Under a tiling compositor the popup is therefore tiled like any other
+window and lands wherever the layout puts it, rather than next to the cursor.
+Both are fixed with one compositor rule matching the popup's app ID
 (`com.writingtools.WritingTools`) and its window title (`Writing Tools`, unique
 to the popup — the settings, about, and response windows are unaffected).
 
