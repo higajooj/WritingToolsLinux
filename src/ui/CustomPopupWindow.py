@@ -395,7 +395,11 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
     def init_ui(self):
         logging.debug('Setting up CustomPopupWindow UI')
-        self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
+        # Qt.Tool marks this as a utility window (_NET_WM_WINDOW_TYPE_UTILITY on
+        # X11), which is enough for most WMs to float it. Wayland has no such
+        # hint -- the popup is a plain xdg_toplevel there, so compositors need a
+        # float rule instead; see the Hyprland notes in the run-from-source doc.
+        self.setWindowFlags(QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle("Writing Tools")
         
@@ -555,7 +559,6 @@ class CustomPopupWindow(QtWidgets.QWidget):
             content_layout.addWidget(update_label, alignment=QtCore.Qt.AlignCenter)
         
         logging.debug('CustomPopupWindow UI setup complete')
-        self.installEventFilter(self)
         QtCore.QTimer.singleShot(250, lambda: self.custom_input.setFocus())
 
     @staticmethod
@@ -1023,13 +1026,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.app.process_option(instruction)
             self.close()
 
-    def eventFilter(self, obj, event):
-        # Hide on deactivate only if NOT in edit mode
-        if event.type()==QtCore.QEvent.WindowDeactivate:
-            if not self.edit_mode:
-                self.hide()
-                return True
-        return super().eventFilter(obj, event)
+    # No hide-on-deactivate: under a focus-follows-mouse compositor merely
+    # moving the pointer away would dismiss the popup. It closes on Escape,
+    # the close button, picking an action, or pressing the hotkey again.
 
     def keyPressEvent(self, event):
         if event.key()==QtCore.Qt.Key_Escape:

@@ -59,4 +59,43 @@ Reload with `hyprctl reload`. Run `hyprctl globalshortcuts` while Writing Tools
 is open to inspect registered IDs. If none appear, check the application log
 for portal registration failures.
 
+## Floating the popup
+
+The shortcut popup is a frameless top-level window. On X11 it carries the
+`Qt.Tool` hint, so window managers float it without further configuration.
+
+Wayland has no equivalent hint, and a Wayland client cannot position its own
+window either. Under a tiling compositor the popup is therefore tiled like any
+other window and lands wherever the layout puts it, rather than next to the
+cursor. Both are fixed with one compositor rule matching the popup's app ID
+(`com.writingtools.WritingTools`) and its window title (`Writing Tools`, unique
+to the popup — the settings, about, and response windows are unaffected).
+
+For Hyprland's `hyprland.conf`:
+
+```ini
+windowrule = float, class:^(com\.writingtools\.WritingTools)$, title:^(Writing Tools)$
+windowrule = move cursor_x cursor_y+20, class:^(com\.writingtools\.WritingTools)$, title:^(Writing Tools)$
+```
+
+For Hyprland's Lua configuration:
+
+```lua
+hl.window_rule({
+    name  = "writing-tools-popup",
+    match = { class = [[^com\.writingtools\.WritingTools$]], title = [[^Writing Tools$]] },
+    float = true,
+    move  = "cursor_x cursor_y+20",
+})
+```
+
+`cursor_x` and `cursor_y` are Hyprland's own cursor coordinates, so the popup
+opens just below the pointer. Reload with `hyprctl reload`.
+
+Other compositors need their own equivalent. For sway:
+
+```
+for_window [app_id="com.writingtools.WritingTools" title="Writing Tools"] floating enable
+```
+
 [Back to README](../README.md)

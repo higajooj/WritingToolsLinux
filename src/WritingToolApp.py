@@ -576,10 +576,13 @@ class WritingToolApp(QtWidgets.QApplication):
         try:
             if self.popup_window is not None:
                 logging.debug('Existing popup window found')
-                if self.popup_window.isVisible():
-                    logging.debug('Closing existing visible popup window')
-                    self.popup_window.close()
-                self.popup_window = None
+                # Clear the attribute first: close() can re-enter through Qt's
+                # event loop, and the old window must already be unreachable by
+                # then. Always close *and* delete -- a merely hidden popup keeps
+                # its pending focus timer alive and leaks.
+                stale_popup, self.popup_window = self.popup_window, None
+                stale_popup.close()
+                stale_popup.deleteLater()
             logging.debug('Creating new popup window')
             self.popup_window = ui.CustomPopupWindow.CustomPopupWindow(self)
 
@@ -612,8 +615,14 @@ class WritingToolApp(QtWidgets.QApplication):
             # Adjust if the popup would go off the bottom edge of the screen
             if y + popup_height > screen_geometry.bottom():
                 y = cursor_pos.y() - popup_height - 10  # 10 pixels above cursor
-            self.popup_window.move(x, y)
-            logging.debug(f'Popup window moved to position: ({x}, {y})')
+            if isinstance(self.input_backend, WaylandInputBackend):
+                # Wayland clients cannot position their own toplevels, so move()
+                # silently does nothing here. Placement is the compositor's job:
+                # see the float/move window rule documented for Hyprland.
+                logging.debug('Wayland: leaving popup placement to the compositor')
+            else:
+                self.popup_window.move(x, y)
+                logging.debug(f'Popup window moved to position: ({x}, {y})')
         except Exception as e:
             logging.error(f'Error showing popup window: {e}', exc_info=True)
 
