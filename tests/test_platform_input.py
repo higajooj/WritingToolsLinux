@@ -1,5 +1,3 @@
-"""Shortcut triggers must be rejected here rather than by a silent portal bind."""
-
 from pathlib import Path
 import sys
 import unittest

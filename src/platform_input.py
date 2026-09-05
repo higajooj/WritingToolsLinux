@@ -1,10 +1,4 @@
-"""Wayland input and clipboard adapter.
-
-Wayland intentionally does not expose the X11 global input APIs.  This module
-keeps the portal, clipboard, and compositor details out of the application
-workflow and provides a graceful clipboard-first path when a compositor cannot
-inject input.
-"""
+"""Wayland input and clipboard support."""
 
 import logging
 import os
@@ -28,22 +22,16 @@ MODIFIER_NAMES = {
 
 
 def validate_trigger(trigger):
-    """Check a user-typed shortcut against the portal's trigger format.
-
-    Returns `(ok, message)`; `message` is empty when `ok`. The portal wants at
-    least one modifier and exactly one key, so `space` alone or `ctrl+a+b` are
-    both rejected before they reach BindShortcuts, where a bad trigger would
-    only surface as a silent bind failure.
-    """
+    """Validate a shortcut before passing it to the portal."""
     parts = [part.strip() for part in (trigger or "").split("+")]
     if not parts or any(not part for part in parts):
-        return False, "Use '+' between keys with nothing empty, e.g. ctrl+space."
+        return False, "Separate keys with '+', for example ctrl+space."
     modifiers = [part for part in parts if part.lower() in MODIFIER_NAMES]
     keys = [part for part in parts if part.lower() not in MODIFIER_NAMES]
     if not modifiers:
-        return False, "Add a modifier (ctrl, alt, shift, or super), e.g. ctrl+space."
+        return False, "Add a modifier, for example ctrl+space."
     if len(keys) != 1:
-        return False, "Use exactly one key after the modifiers, e.g. super+p."
+        return False, "Use one key with the modifiers, for example super+p."
     return True, ""
 
 
@@ -53,7 +41,7 @@ def desktop_entry_path():
 
 
 def desktop_entry_contents():
-    # Keep the interpreter path unresolved: resolving it would escape the venv.
+    # Resolving the interpreter path would bypass an active virtual environment.
     exec_line = "{} {}".format(
         shlex.quote(os.path.abspath(sys.executable)),
         shlex.quote(str(app_root() / "main.py")),
@@ -73,10 +61,7 @@ def desktop_entry_contents():
 
 
 def ensure_desktop_entry():
-    """Create the desktop entry required by the portal.
-
-    Keep an existing user entry. Return an error message if creation fails.
-    """
+    """Create the desktop entry required by the portal."""
     path = desktop_entry_path()
     if os.path.exists(path):
         return ""

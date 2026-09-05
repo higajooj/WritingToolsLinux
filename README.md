@@ -1,14 +1,13 @@
 # Writing Tools for Linux
 
-A system-wide AI writing assistant for Wayland, written in Python with PySide6.
-Copy some text and use a shortcut to proofread, rewrite, change tone, summarize,
-or apply custom instructions. Providers include Gemini, Ollama, and
-OpenAI-compatible servers.
+Writing Tools is a Wayland-only AI writing assistant for Linux, built with
+Python and PySide6. Copy text, then use a shortcut to proofread, rewrite,
+change tone, summarize, or apply custom instructions. It supports Gemini,
+Ollama, and OpenAI-compatible servers.
 
-Linux on Wayland is the only supported platform. There is no X11 or Windows
-code path, and no packaged build — the app runs from a checkout with
-`python main.py`. Application code lives in `src/`, images and translations in
-`assets/`, and tests in `tests/`.
+Run it from a checkout with `python main.py`. There is no X11, Windows, or
+packaged-build support. The code is in `src/`, assets are in `assets/`, and
+tests are in `tests/`.
 
 ## Run
 
@@ -19,19 +18,18 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-You also need `wl-clipboard`, `xdg-desktop-portal`, and the portal backend for
-your compositor (for Hyprland: `xdg-desktop-portal-hyprland`).
+Install `wl-clipboard`, `xdg-desktop-portal`, and your compositor's portal
+backend. For Hyprland, use `xdg-desktop-portal-hyprland`.
 
 Configure your provider in the initial setup or Settings. The default shortcut
-is `ctrl+space`; change it if it conflicts with another application. Global
-shortcuts go through the desktop portal, so wlroots compositors also need a
-binding in their own config. See the
+is `ctrl+space`; change it if it conflicts with another application. wlroots
+compositors also need a shortcut binding in their configuration. See the
 [source and desktop setup guide](README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
-for the portal bindings and the window rules that float the popup.
+for shortcut bindings and popup window rules.
 
 ## Features and configuration
 
-- Proofread, rewrite, adjust tone, or describe a custom change on the copied text.
+- Proofread, rewrite, adjust tone, or apply a custom change to copied text.
 - Summaries, key points, and tables in a response window with Markdown rendering.
 - Custom buttons and shortcuts in `options.json`.
 - Light/dark appearance and gradient/plain themes.
@@ -78,8 +76,7 @@ Run the tests from the repository root:
 QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
 ```
 
-Update with `git pull`, then reinstall dependencies if `requirements.txt`
-changed. There is no packaged build and no in-app update check.
+Update with `git pull`, then reinstall dependencies if `requirements.txt` changed.
 
 ## Credits
 

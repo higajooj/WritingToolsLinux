@@ -1,5 +1,3 @@
-"""Launching from any directory must resolve the same files."""
-
 import os
 from pathlib import Path
 import shlex

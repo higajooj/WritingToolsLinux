@@ -394,9 +394,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
     def init_ui(self):
         logging.debug('Setting up CustomPopupWindow UI')
-        # Wayland has no utility-window hint -- the popup is a plain
-        # xdg_toplevel, so the compositor needs a float rule of its own; see
-        # the Hyprland notes in the run-from-source doc.
+        # Wayland needs a compositor rule to float this top-level window.
         self.setWindowFlags(QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle("Writing Tools")
@@ -833,14 +831,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
         if not hotkey:
             return True, None
 
-        # Authoritative format check: the same one the portal registration
-        # applies, so anything accepted here can actually be bound.
         ok, problem = validate_trigger(hotkey)
         if not ok:
             return False, (
-                f"'{hotkey}' isn't a valid hotkey.\n\n"
-                f"Use '+' between keys, e.g. ctrl+j or ctrl+shift+p.\n"
-                f"({problem})"
+                f"Invalid shortcut: '{hotkey}'.\n\n{problem}"
             )
 
         # Conflict with the global Writing Tools shortcut. Same combination

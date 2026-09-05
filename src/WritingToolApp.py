@@ -78,11 +78,7 @@ class WritingToolApp(QtWidgets.QApplication):
         self.paused = False
         self.toggle_action = None
 
-        # Holder for the user's selected text. Populated asynchronously by a
-        # background thread so the popup can show instantly — see `_show_popup`
-        # and `_capture_clipboard_async`. The lock serializes reads across
-        # rapid hotkey presses so two captures don't fight over the clipboard
-        # at once.
+        # Serialize clipboard reads from rapid shortcut presses.
         self.current_text_holder = None
         self._capture_lock = threading.Lock()
 
@@ -341,23 +337,17 @@ class WritingToolApp(QtWidgets.QApplication):
 
     def start_hotkey_listener(self):
         """
-        Register the main Writing Tools shortcut and any per-button direct
-        hotkeys from options.json with the Wayland GlobalShortcuts portal.
-        Per-button hotkeys fire the corresponding option immediately, skipping
-        the popup.
+        Register the global and direct button shortcuts with the portal.
 
-        Triggers that don't fit the portal's format are logged and skipped. On
-        conflict between a button hotkey and the global shortcut (or between
-        two button hotkeys), the first registration wins and the later one is
-        skipped — the portal can't dispatch one trigger to two shortcut IDs.
+        Invalid or duplicate triggers are skipped. The first matching trigger
+        wins because the portal cannot dispatch it to two shortcut IDs.
         """
         try:
             global_shortcut = self.config.get('shortcut', 'ctrl+space')
             shortcut_map = {'global': global_shortcut}
             taken = {global_shortcut.strip().lower()}
 
-            # Custom is excluded — it needs a typed instruction from the user,
-            # so a "fire directly" hotkey doesn't make sense for it.
+            # Custom actions need typed input and cannot run directly.
             if self.options:
                 for button_name, button_cfg in self.options.items():
                     if button_name == 'Custom':
@@ -427,18 +417,13 @@ class WritingToolApp(QtWidgets.QApplication):
 
     @Slot(str)
     def handle_backend_shortcut(self, shortcut_id):
-        """Dispatch an activated portal shortcut on the Qt thread.
-
-        Every shortcut arrives here, so this is where Pause is honoured.
-        """
+        """Handle a portal shortcut on the Qt thread."""
         if self.paused:
             logging.debug(f'Paused; ignoring shortcut "{shortcut_id}"')
             return
         if shortcut_id == 'global':
             self.on_hotkey_pressed()
         elif shortcut_id.startswith('button:'):
-            # Match the global shortcut's behaviour: cancel any in-flight
-            # request so a new fire doesn't pile up on top of a previous one.
             if self.current_provider:
                 self.current_provider.cancel()
                 self.output_queue = ""
@@ -487,8 +472,6 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         logging.debug('Showing popup window')
 
-        # Fresh holder per popup. The clipboard read happens in the
-        # background so the popup shows without waiting on wl-paste.
         self.current_text_holder = _SelectedTextHolder()
         self._capture_clipboard_async(self.current_text_holder)
 
@@ -515,26 +498,19 @@ class WritingToolApp(QtWidgets.QApplication):
             self.popup_window.activateWindow()
             QtCore.QTimer.singleShot(100, self.popup_window.custom_input.setFocus)
 
-            # Wayland clients cannot position their own toplevels, so move()
-            # silently does nothing here. Placement is the compositor's job:
-            # see the float/move window rule documented for Hyprland.
+            # Wayland clients cannot position top-level windows.
             logging.debug('Leaving popup placement to the compositor')
         except Exception as e:
             logging.error(f'Error showing popup window: {e}', exc_info=True)
 
     def _capture_clipboard_async(self, holder):
         """
-        Read the clipboard in a background thread so the popup can display
-        with no perceptible delay.
+        Read the clipboard without delaying the popup.
 
-        Nothing injects Ctrl+C: Wayland gives no way to copy the focused
-        application's selection, so the user copies before invoking Writing
-        Tools. An empty result is reported by `process_option_thread` as a
-        normal error telling them to do exactly that.
+        Wayland cannot read another application's selection, so users must
+        copy text before invoking Writing Tools.
         """
         def read():
-            # Lock so concurrent hotkey presses don't trample each other's
-            # in-flight captures.
             with self._capture_lock:
                 holder.text = self.input_backend.read_clipboard()
                 logging.debug(f'Captured clipboard text (len={len(holder.text)})')
@@ -716,9 +692,7 @@ class WritingToolApp(QtWidgets.QApplication):
                     
                     pasted = self.input_backend.paste()
                     time.sleep(0.2)
-                    # Keep the generated result on the clipboard when the
-                    # compositor cannot inject Ctrl+V, so the user can paste
-                    # it themselves.
+                    # Restore the old clipboard only after a successful paste.
                     if pasted:
                         self.input_backend.write_clipboard(clipboard_backup)
 
