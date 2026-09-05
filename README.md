@@ -90,7 +90,7 @@ Aside from being the only Windows/Linux program like Apple's Writing Tools, and 
 ### **🐧 Linux (Wayland and X11)**:
 [Run it from the source code](https://github.com/theJayTea/WritingTools/blob/main/README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
 
-Writing Tools has a native Wayland backend. On Hyprland, install `xdg-desktop-portal-hyprland`, `wl-clipboard`, and `dbus-next` for global portal shortcuts, clipboard capture, and automatic paste. On other compositors the clipboard-first workflow remains available; copy the text before invoking Writing Tools and paste the result manually if the compositor does not provide an input injection path. X11 keeps the fully automatic Ctrl+C/Ctrl+V workflow.
+Writing Tools has a native Wayland backend. On Hyprland, install `xdg-desktop-portal-hyprland`, `wl-clipboard`, and `dbus-next` for portal shortcuts, clipboard capture, and automatic paste. Hyprland and other wlroots compositors need a compositor binding. Add `bind = SUPER, P, global, com.writingtools.WritingTools:global` to `hyprland.conf`. The app logs the exact binding at startup. GNOME and KDE use the shortcut requested through the portal. On other compositors, copy text before invoking Writing Tools and paste the result manually when the compositor cannot inject input. X11 keeps the automatic Ctrl+C/Ctrl+V workflow.
 
 <a id="macos"></a>
 ### 🍎 macOS

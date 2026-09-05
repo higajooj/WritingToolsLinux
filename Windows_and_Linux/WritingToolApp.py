@@ -384,8 +384,8 @@ class WritingToolApp(QtWidgets.QApplication):
                             shortcut_map['button:' + button_name] = button_cfg['hotkey'].strip()
                 callbacks = {k: k for k in shortcut_map}
                 self.input_backend.set_callbacks(callbacks)
+                self.registered_hotkey = None
                 self.input_backend.register(shortcut_map)
-                self.registered_hotkey = self.config.get('shortcut', 'ctrl+space')
                 return
             if self.hotkey_listener is not None:
                 self.hotkey_listener.stop()
@@ -507,6 +507,13 @@ class WritingToolApp(QtWidgets.QApplication):
         # waits on the holder, surfaces "Please select text…" if empty,
         # and routes window-mode options through the response window.
         self.process_option(button_name)
+
+    @Slot(bool)
+    def handle_backend_registration(self, registered):
+        """Set `registered_hotkey` after portal registration finishes."""
+        self.registered_hotkey = self.config.get('shortcut', 'ctrl+space') if registered else None
+        if not registered:
+            logging.warning('Global shortcut not registered. %s', self.input_backend.diagnostics())
 
     @Slot(str)
     def handle_backend_shortcut(self, shortcut_id):
@@ -1137,5 +1144,6 @@ class WritingToolApp(QtWidgets.QApplication):
         logging.debug('Stopping the listener')
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
+        self.input_backend.stop()
         logging.debug('Exiting application')
         self.quit()

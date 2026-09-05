@@ -22,7 +22,8 @@ After extracting the folder, open your **Terminal** (or **Command Prompt**) in t
    # and wl-clipboard (for Hyprland: xdg-desktop-portal-hyprland).
    ```
    On Wayland, install the included `com.writingtools.WritingTools.desktop`
-   entry. Replace `/path/to/WritingTools` with your checkout path, then run:
+   entry. It identifies Writing Tools to the portal and provides its icon.
+   Replace `/path/to/WritingTools` with your checkout path, then run:
    ```bash
    mkdir -p ~/.local/share/applications
    cp com.writingtools.WritingTools.desktop ~/.local/share/applications/
@@ -42,6 +43,22 @@ Of course, you'll need to have [Python installed](https://www.python.org/downloa
    ```bash
    python3 main.py
    ```
+
+**4. Configure Wayland shortcuts**
+
+GNOME and KDE use the shortcut requested through the portal. wlroots
+compositors require a binding in their own configuration. Writing Tools
+registers `com.writingtools.WritingTools:global` and
+`com.writingtools.WritingTools:button:<Name>` for each button hotkey. It logs
+the required bindings at startup.
+
+Add this to Hyprland's `hyprland.conf`:
+```ini
+bind = SUPER, P, global, com.writingtools.WritingTools:global
+```
+Reload Hyprland with `hyprctl reload`. Run `hyprctl globalshortcuts` while
+Writing Tools is open to list the registered IDs. If it shows no entries, the
+portal registration failed. Check the app log.
 
 
 ### [**◀️ Back to main page**](https://github.com/theJayTea/WritingTools)
