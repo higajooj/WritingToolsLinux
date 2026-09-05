@@ -206,6 +206,29 @@ These instructions are for any Writing Tools version, using the OpenAI-Compatibl
    - API Model: `llama3.1:8b`
 5. That's it! **Enjoy Writing Tools with _absolute_ privacy and no internet connection!** 🎉 From now on, you'll simply need to launch Ollama and Writing Tools into the background for it to work.
 
+## Using claude-code-proxy on Windows/Linux
+
+Writing Tools can connect to a local `claude-code-proxy` through the **OpenAI Compatible (For Experts)** provider. Sign in to your upstream provider through the proxy first, then start (or restart) the proxy with its OpenAI-compatible routes enabled:
+
+```sh
+CCP_CODEX_RESPONSES_API=1 claude-code-proxy serve
+```
+
+In Writing Tools' AI setup or Settings, enter:
+
+| Setting | Value |
+| --- | --- |
+| API Base URL | `http://127.0.0.1:18765/v1` |
+| API Key | Leave blank |
+| API Model | `gpt-5.6-sol`, or another ID listed by `claude-code-proxy models` |
+| API Organisation / API Project | Leave blank |
+
+An empty API key sends requests without an Authorization header. The proxy handles upstream authentication. Other OpenAI-compatible servers that require a key still use the key entered in Settings.
+
+If requests return HTTP 404, check that the proxy was started with `CCP_CODEX_RESPONSES_API=1` and that the base URL ends in `/v1`, without `/chat/completions`. Older Writing Tools versions that require a key can use `unused` as a placeholder; the proxy ignores incoming bearer credentials.
+
+Known proxy limitation: with claude-code-proxy 0.1.35 and the Codex backend, follow-up chat can fail with `Invalid value: 'input_text'`. The proxy translates assistant history into the wrong upstream content type. Single-request writing actions work; follow-up chat requires a fix in the proxy.
+
 ## 🐞 Known Issues
 1. Some reported hotkey conflicts on the latest v9 build: will release a maintenance update when I get time!
 

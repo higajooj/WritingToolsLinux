@@ -41,7 +41,7 @@ from typing import List
 from google import genai
 from google.genai import types as genai_types
 from ollama import Client as OllamaClient
-from openai import OpenAI
+from openai import OpenAI, Omit
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import QVBoxLayout
 from ui.UIUtils import colorMode
@@ -514,7 +514,7 @@ class OpenAICompatibleProvider(AIProvider):
         self.client = None
 
         settings = [
-            TextSetting(name="api_key", display_name="API Key", description="API key for the OpenAI-compatible API."),
+            TextSetting(name="api_key", display_name="API Key", description="Leave blank if your server does not require authentication."),
             TextSetting("api_base", "API Base URL", "https://api.openai.com/v1", "E.g. https://api.openai.com/v1"),
             TextSetting("api_organisation", "API Organisation", "", "Leave blank if not applicable."),
             TextSetting("api_project", "API Project", "", "Leave blank if not applicable."),
@@ -548,8 +548,8 @@ class OpenAICompatibleProvider(AIProvider):
             response = self.client.chat.completions.create(
                 model=self.api_model,
                 messages=messages,
-                temperature=0.5,
-                stream=False
+                stream=False,
+                extra_headers={"Authorization": Omit()} if not self.api_key else {}
             )
             response_text = response.choices[0].message.content.strip()
 
@@ -570,8 +570,11 @@ class OpenAICompatibleProvider(AIProvider):
             return ""
 
     def after_load(self):
+        self.api_key = (self.api_key or "").strip()
         self.client = OpenAI(
-            api_key=self.api_key,
+            # The SDK requires a credential even for keyless servers. The
+            # placeholder stays in memory and is omitted from outgoing requests.
+            api_key=self.api_key or "unused",
             base_url=self.api_base,
             organization=self.api_organisation,
             project=self.api_project
