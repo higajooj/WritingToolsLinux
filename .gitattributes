@@ -1,0 +1,12 @@
+# Normalize all text to LF in the repo and on checkout. Linux-only project.
+* text=auto eol=lf
+
+# Shell scripts must stay LF regardless of detection.
+*.sh text eol=lf
+
+# Binary assets - never touch.
+*.png  binary
+*.ico  binary
+*.icns binary
+*.mp4  binary
+*.mo   binary
