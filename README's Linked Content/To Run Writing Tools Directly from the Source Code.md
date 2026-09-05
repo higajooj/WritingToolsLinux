@@ -1,67 +1,60 @@
-# 👨‍💻 To Run Writing Tools Directly from the Source Code
+# Run Writing Tools on Linux
 
-If you prefer to run the program directly from the `main.py` file, follow these OS-specific instructions.
+From the repository root, create a virtual environment and install dependencies:
 
-**1. Download the Code**
-- Click the green `<> Code ▼` button toward the very top of this page, and click `Download ZIP`.
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python main.py
+```
 
-**2. Install Dependencies**  
-After extracting the folder, open your **Terminal** (or **Command Prompt**) in the relevant directory.
+Settings are saved in the ignored `config.json` beside `main.py`.
+Custom buttons are stored in `options.json`. Keep these files when updating.
 
-- Windows:
-   ```bash
-   cd path\to\Windows_and_Linux
-   pip install -r requirements.txt
-   ```
+## Desktop integration
 
-- Linux:
-   ```bash
-   cd /path/to/Windows_and_Linux
-   pip3 install -r requirements.txt
-   # Wayland users should also install their compositor's portal backend
-   # and wl-clipboard (for Hyprland: xdg-desktop-portal-hyprland).
-   ```
-   On Wayland, Writing Tools creates
-   `~/.local/share/applications/com.writingtools.WritingTools.desktop` when
-   it first runs. The entry points to the Python interpreter and checkout that
-   launched it. The portal requires it for global shortcuts. An existing entry
-   stays unchanged. To install the bundled entry instead, replace its
-   `/path/to/WritingTools` placeholders, then run:
-   ```bash
-   mkdir -p ~/.local/share/applications
-   cp com.writingtools.WritingTools.desktop ~/.local/share/applications/
-   update-desktop-database ~/.local/share/applications 2>/dev/null || true
-   ```
-Of course, you'll need to have [Python installed](https://www.python.org/downloads/)!
+On Wayland, install `wl-clipboard`, `xdg-desktop-portal`, and the portal backend
+for your desktop (for Hyprland: `xdg-desktop-portal-hyprland`).
 
-**3. Run the Program**
-- **Windows:**
-   ```bash
-   python main.py
-   # Tip: If you want Writing Tools to remain running even after you close your Terminal window, run `pythonw main.py` instead of `python main.py`.
+Writing Tools creates
+`~/.local/share/applications/com.writingtools.WritingTools.desktop` on first
+launch, respecting `XDG_DATA_HOME` if set. The entry uses the interpreter and
+checkout that launched it. Existing entries stay unchanged.
 
-   ```
+After relocating a checkout, update the existing entry's `Exec` and `Icon`
+paths. To install the bundled entry manually, replace its
+`/path/to/WritingTools` placeholders with your checkout's absolute path, then run:
 
-- **Linux:**
-   ```bash
-   python3 main.py
-   ```
+```sh
+mkdir -p ~/.local/share/applications
+cp com.writingtools.WritingTools.desktop ~/.local/share/applications/
+update-desktop-database ~/.local/share/applications
+```
 
-**4. Configure Wayland shortcuts**
+## Shortcuts
+
+On X11, Writing Tools uses pynput for global shortcuts, selection capture,
+and pasting. Change the shortcut in Settings if another application uses it.
+
+On Wayland, shortcut registration uses the desktop portal. Automatic selection
+capture and pasting depend on compositor support; use the clipboard when these
+are unavailable.
 
 GNOME and KDE use the shortcut requested through the portal. wlroots
 compositors require a binding in their own configuration. Writing Tools
 registers `com.writingtools.WritingTools:global` and
-`com.writingtools.WritingTools:button:<Name>` for each button hotkey. It logs
+`com.writingtools.WritingTools:button:<Name>` for each button hotkey and logs
 the required bindings at startup.
 
-Add this to Hyprland's `hyprland.conf`:
+For Hyprland, add this to `hyprland.conf`:
+
 ```ini
 bind = SUPER, P, global, com.writingtools.WritingTools:global
 ```
-Reload Hyprland with `hyprctl reload`. Run `hyprctl globalshortcuts` while
-Writing Tools is open to list the registered IDs. If it shows no entries, the
-portal registration failed. Check the app log.
 
+Reload with `hyprctl reload`. Run `hyprctl globalshortcuts` while Writing Tools
+is open to inspect registered IDs. If none appear, check the application log
+for portal registration failures.
 
-### [**◀️ Back to main page**](https://github.com/theJayTea/WritingTools)
+[Back to README](../README.md)

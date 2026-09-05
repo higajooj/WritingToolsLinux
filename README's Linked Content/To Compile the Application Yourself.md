@@ -1,60 +1,35 @@
-# 👨‍💻 To compile the application yourself:
+# Build Writing Tools for Linux
 
-### Windows and Linux Version build instructions:
-Here's how to compile it with PyInstaller and a virtual environment:
+Run from the repository root:
 
-1. First, create and activate a virtual environment:
-```bash
-# Install virtualenv if you haven't already
-pip install virtualenv
-
-# Create a new virtual environment
-virtualenv myvenv
-
-# Activate it
-# On Windows:
-myvenv\Scripts\activate
-# On Linux:
-source myvenv/bin/activate
-```
-
-2. Once activated, install the required packages:
-
-```bash
-pip install -r requirements.txt
-```
-
-3. Build Writing Tools:
-```bash
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 python pyinstaller-build-script.py
 ```
 
-### macOS Version (by [Aryamirsepasi](https://github.com/Aryamirsepasi)) build instructions:
+The build script uses PyInstaller to create `dist/Writing Tools/`, containing
+the executable, libraries, icons, translations, backgrounds, and default options.
+Keep the entire directory together. Each build replaces the previous build output.
 
-1. **Install Xcode**
-   - Download and install Xcode from the App Store
-   - Launch Xcode once installed and complete any additional component installations
+Launch it with:
 
-2. **Clone the Repository**
-   - Open Terminal and navigate to the directory where you want to store the project:
-   ```bash
-   git clone https://github.com/theJayTea/WritingTools.git
-   ```
+```sh
+"./dist/Writing Tools/Writing Tools"
+```
 
-3. **Open in Xcode**
-   - Open Xcode
-   - Select "Open an existing project..." from the options.
-   - Navigate to the macOS folder within the WritingTools directory that you cloned previously, and select "writing-tools.xcodeproj"
+Use a writable directory: settings and custom options are saved beside the
+executable. Your source checkout's private `config.json` is never bundled.
+Builds include the checkout's current `options.json`; review custom prompts
+before sharing a distribution.
 
-4. **Configure Project Settings**
-   - In Xcode, select the project in the Navigator pane.
-   - Under "Targets", select "writing-tools"
-   - Set the following:
-     - Deployment Target: macOS 14.0
-     - Signing & Capabilities: Add your development team
+Build on Linux for Linux. The target system must provide a compatible Linux
+runtime and desktop session; Wayland also needs the portal backend and clipboard
+utilities described in the [source instructions](To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md).
 
-5. **Build and Run**
-   - In Xcode, select "My Mac" as the run destination
-   - Click the Play button or press ⌘R to build and run
+To use a desktop launcher, set its `Exec` to the built executable (quote paths
+containing spaces) and `Icon` to the distribution's `icons/app_icon.png`.
+Keep `StartupWMClass=com.writingtools.WritingTools`.
 
-### [**◀️ Back to main page**](https://github.com/theJayTea/WritingTools)
+[Back to README](../README.md)

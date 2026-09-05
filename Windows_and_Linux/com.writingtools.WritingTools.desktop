@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Writing Tools
-Comment=AI writing assistant
-Exec=python3 /path/to/WritingTools/Windows_and_Linux/main.py
-Icon=/path/to/WritingTools/Windows_and_Linux/icons/app_icon.png
-Terminal=false
-Categories=Utility;
-StartupWMClass=com.writingtools.WritingTools
