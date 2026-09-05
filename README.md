@@ -3,7 +3,7 @@
 Writing Tools is a Wayland-only AI writing assistant for Linux, built with
 Python and PySide6. Copy text, then use a shortcut to proofread, rewrite,
 change tone, summarize, or apply custom instructions. It supports Gemini,
-Ollama, and OpenAI-compatible servers.
+ChatGPT subscriptions, Ollama, and OpenAI-compatible servers.
 
 Run it from a checkout with `python main.py`. There is no X11, Windows, or
 packaged-build support. The code is in `src/`, assets are in `assets/`, and
@@ -34,6 +34,7 @@ for shortcut bindings and popup window rules.
 - Custom buttons and shortcuts in `options.json`.
 - Light/dark appearance and gradient/plain themes.
 - Local models through Ollama or an OpenAI-compatible server.
+- Browser-based ChatGPT subscription sign-in through the official Codex CLI.
 
 Settings, including provider credentials, are stored locally in the ignored
 `config.json`. Keep it private. Text is sent to the provider you configure
@@ -43,6 +44,26 @@ machine.
 For Ollama, start the server, download a model, and select the Ollama provider
 in Settings with that model's name. Alternatively, use the OpenAI-compatible
 provider with base URL `http://localhost:11434/v1`.
+
+### ChatGPT subscription access
+
+To use models included with a ChatGPT plan, first install the official Codex
+CLI:
+
+```sh
+npm install -g @openai/codex
+```
+
+Then choose **OpenAI Subscription (ChatGPT)** in Settings and select **Sign in
+with ChatGPT**. Writing Tools opens the browser for authentication and loads
+the models available to that account. The default **Automatic** model follows
+the Codex default; you can also choose a model from the account dynamically.
+
+Writing Tools uses its own Codex data directory, so signing in or out here does
+not change the account used by your normal Codex CLI sessions. Authentication
+is managed by Codex and is not stored in `config.json`. See OpenAI's official
+[Codex CLI documentation](https://learn.chatgpt.com/docs/codex/cli) for current
+installation and subscription details.
 
 ## Using claude-code-proxy
 

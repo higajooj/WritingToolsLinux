@@ -13,7 +13,13 @@ import ui.CustomPopupWindow
 import ui.OnboardingWindow
 import ui.ResponseWindow
 import ui.SettingsWindow
-from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
+from aiprovider import (
+    GeminiProvider,
+    OllamaProvider,
+    OpenAICompatibleProvider,
+    OpenAISubscriptionProvider,
+    obfuscate_api_key,
+)
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -89,7 +95,12 @@ class WritingToolApp(QtWidgets.QApplication):
         self.setup_ctrl_c_listener()
 
         # Setup available AI providers
-        self.providers = [GeminiProvider(self), OpenAICompatibleProvider(self), OllamaProvider(self)]
+        self.providers = [
+            GeminiProvider(self),
+            OpenAISubscriptionProvider(self),
+            OpenAICompatibleProvider(self),
+            OllamaProvider(self),
+        ]
 
         if not self.config:
             logging.debug('No config found, showing onboarding')
@@ -970,5 +981,10 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         logging.debug('Stopping the listener')
         self.input_backend.stop()
+        for provider in self.providers:
+            try:
+                provider.before_load()
+            except Exception:
+                logging.exception("Failed to shut down provider %s", provider.provider_name)
         logging.debug('Exiting application')
         self.quit()

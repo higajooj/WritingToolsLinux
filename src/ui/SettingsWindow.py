@@ -140,10 +140,12 @@ class SettingsWindow(QtWidgets.QWidget):
         if provider.provider_name not in self.app.config["providers"]:
             self.app.config["providers"][provider.provider_name] = {}
 
-        # Add provider settings
-        for setting in provider.settings:
-            setting.set_value(self.app.config["providers"][provider.provider_name].get(setting.name, setting.default_value))
-            setting.render_to_layout(self.current_provider_layout)
+        # Providers may use the standard field renderer or supply richer custom
+        # controls such as browser sign-in and a dynamic model picker.
+        provider.render_settings(
+            self.current_provider_layout,
+            self.app.config["providers"][provider.provider_name],
+        )
 
         layout.addLayout(self.current_provider_layout)
 
@@ -337,6 +339,16 @@ class SettingsWindow(QtWidgets.QWidget):
 
     def save_settings(self):
         """Save the current settings."""
+        provider = self.app.providers[self.provider_dropdown.currentIndex()]
+        valid, message = provider.validate_settings()
+        if not valid:
+            QtWidgets.QMessageBox.warning(
+                self,
+                _("Provider setup incomplete"),
+                message,
+            )
+            return
+
         self.app.config['locale'] = 'en'
 
         if not self.providers_only:
@@ -351,7 +363,7 @@ class SettingsWindow(QtWidgets.QWidget):
         # Mark config as updated for v8 (new users start with this flag set)
         self.app.config['is_config_file_updated_for_v8'] = True
 
-        self.app.providers[self.provider_dropdown.currentIndex()].save_config()
+        provider.save_config()
 
         provider_name = self.app.config.get('provider', 'Gemini')
         self.app.current_provider = next(

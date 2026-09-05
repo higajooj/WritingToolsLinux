@@ -52,7 +52,8 @@ class OnboardingWindow(QtWidgets.QWidget):
         • {_('Chat with AI anytime by invoking Writing Tools without selecting any text.')}
 
         • {_('Supports an extensive range of AI models:')}
-            - {_('Gemini 2.0')}
+            - {_('Gemini')}
+            - {_('ChatGPT subscription access through OpenAI Codex')}
             - {_('ANY OpenAI Compatible API — including local LLMs!')}
         """
         features_label = QtWidgets.QLabel(features_text)
