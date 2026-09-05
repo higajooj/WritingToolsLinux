@@ -11,6 +11,7 @@ def run_pyinstaller_build():
         sys.executable, "-m", "PyInstaller",
         "--onedir", "--contents-directory", ".",
         "--name", "Writing Tools", "--clean", "--noconfirm",
+        "--paths", str(root / "src"),
         "--exclude-module", "tkinter",
         "--exclude-module", "IPython",
         "--exclude-module", "unittest",
@@ -22,8 +23,9 @@ def run_pyinstaller_build():
         "background.png", "background_dark.png",
         "background_popup.png", "background_popup_dark.png",
     ):
-        destination = asset if (root / asset).is_dir() else "."
-        command.extend(["--add-data", f"{root / asset}:{destination}"])
+        source = root / asset if asset in ("options.json", "options_examples.json") else root / "assets" / asset
+        destination = asset if source.is_dir() else "."
+        command.extend(["--add-data", f"{source}:{destination}"])
     command.append(str(root / "main.py"))
     subprocess.run(command, cwd=root, check=True)
     print(f"Build completed: {root / 'dist' / 'Writing Tools'}")

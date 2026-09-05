@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 
+from app_paths import app_root, asset_root
 from PySide6 import QtCore
 
 APP_ID = "com.writingtools.WritingTools"
@@ -31,14 +32,12 @@ def desktop_entry_path():
 
 
 def desktop_entry_contents():
-    here = os.path.dirname(os.path.abspath(__file__))
     executable = os.path.abspath(sys.executable)
     if getattr(sys, "frozen", False):
         exec_line = shlex.quote(executable)
-        icon = os.path.join(os.path.dirname(executable), "icons", "app_icon.png")
     else:
-        exec_line = "{} {}".format(shlex.quote(executable), shlex.quote(os.path.join(here, "main.py")))
-        icon = os.path.join(here, "icons", "app_icon.png")
+        exec_line = "{} {}".format(shlex.quote(executable), shlex.quote(str(app_root() / "main.py")))
+    icon = str(asset_root() / "icons" / "app_icon.png")
     lines = [
         "[Desktop Entry]",
         "Type=Application",

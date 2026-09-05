@@ -5,8 +5,9 @@ Select text and use a shortcut to proofread, rewrite, change tone, summarize,
 or apply custom instructions. Providers include Gemini, Ollama, and
 OpenAI-compatible servers.
 
-This repository maintains the Linux application as its only version. All
-application code, assets, and tests live at the repository root.
+This repository maintains the Linux application as its only version. Application
+code lives in `src/`, bundled images and translations in `assets/`, and tests
+in `tests/`. The root `main.py` remains the source launcher.
 
 ## Run
 

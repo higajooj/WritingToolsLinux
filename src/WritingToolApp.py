@@ -1,3 +1,4 @@
+from app_paths import asset_root, app_root
 import gettext
 import json
 import logging
@@ -143,7 +144,7 @@ class WritingToolApp(QtWidgets.QApplication):
         try:
             translation = gettext.translation(
                 'messages',
-                localedir=os.path.join(os.path.dirname(__file__), 'locales'),
+                localedir=os.path.join(asset_root(), 'locales'),
                 languages=[lang]
             )
         except FileNotFoundError:
@@ -191,7 +192,7 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         Load the configuration file.
         """
-        self.config_path = os.path.join(os.path.dirname(sys.argv[0]), 'config.json')
+        self.config_path = os.path.join(app_root(), 'config.json')
         logging.debug(f'Loading config from {self.config_path}')
         if os.path.exists(self.config_path):
             with open(self.config_path, 'r') as f:
@@ -323,7 +324,7 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         Load the options file.
         """
-        self.options_path = os.path.join(os.path.dirname(sys.argv[0]), 'options.json')
+        self.options_path = os.path.join(app_root(), 'options.json')
         logging.debug(f'Loading options from {self.options_path}')
         if os.path.exists(self.options_path):
             with open(self.options_path, 'r') as f:
@@ -583,7 +584,7 @@ class WritingToolApp(QtWidgets.QApplication):
             self.popup_window = ui.CustomPopupWindow.CustomPopupWindow(self)
 
             # Set the window icon
-            icon_path = os.path.join(os.path.dirname(sys.argv[0]), 'icons', 'app_icon.png')
+            icon_path = os.path.join(asset_root(), 'icons', 'app_icon.png')
             if os.path.exists(icon_path): self.setWindowIcon(QtGui.QIcon(icon_path))
             # Get the screen containing the cursor
             cursor_pos = QCursor.pos()
@@ -886,7 +887,7 @@ class WritingToolApp(QtWidgets.QApplication):
             return
 
         logging.debug('Creating system tray icon')
-        icon_path = os.path.join(os.path.dirname(sys.argv[0]), 'icons', 'app_icon.png')
+        icon_path = os.path.join(asset_root(), 'icons', 'app_icon.png')
         if not os.path.exists(icon_path):
             logging.warning(f'Tray icon not found at {icon_path}')
             # Use a default icon if not found

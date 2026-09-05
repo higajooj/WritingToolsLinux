@@ -11,6 +11,9 @@ python pyinstaller-build-script.py
 
 The build script uses PyInstaller to create `dist/Writing Tools/`, containing
 the executable, libraries, icons, translations, backgrounds, and default options.
+The build collects code from `src/` and resources from `assets/`, keeping
+resources beside the executable in the distribution. The generated root
+`Writing Tools.spec` is ignored by Git; regenerate it using the build script.
 Keep the entire directory together. Each build replaces the previous build output.
 
 Launch it with:

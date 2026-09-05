@@ -10,7 +10,9 @@ python main.py
 ```
 
 Settings are saved in the ignored `config.json` beside `main.py`.
-Custom buttons are stored in `options.json`. Keep these files when updating.
+Custom buttons are stored in the root `options.json`. Keep these files when updating.
+Application code lives in `src/`; icons, backgrounds, and translations live in
+`assets/`. You can launch the root `main.py` by absolute path from any directory.
 
 ## Desktop integration
 
@@ -23,7 +25,8 @@ launch, respecting `XDG_DATA_HOME` if set. The entry uses the interpreter and
 checkout that launched it. Existing entries stay unchanged.
 
 After relocating a checkout, update the existing entry's `Exec` and `Icon`
-paths. To install the bundled entry manually, replace its
+paths. After updating from the old layout, change the source icon path to
+`assets/icons/app_icon.png`; the launch command stays the same. To install the bundled entry manually, replace its
 `/path/to/WritingTools` placeholders with your checkout's absolute path, then run:
 
 ```sh
