@@ -4,6 +4,7 @@ openai
 pyperclip
 pynput
 PySide6
+dbus-next
 markdown2
 pyinstaller
 ollama

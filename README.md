@@ -87,12 +87,10 @@ Aside from being the only Windows/Linux program like Apple's Writing Tools, and 
 
 **PS: Go to Writing Tools' Settings (from its tray icon at the bottom right of the taskbar) to enable starting Writing Tools on boot.**
 
-### **🐧 Linux (work-in-progress)**:
+### **🐧 Linux (Wayland and X11)**:
 [Run it from the source code](https://github.com/theJayTea/WritingTools/blob/main/README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
 
-Writing Tools works well on x11. On Wayland, there are a few caveats:
-- [it works on XWayland apps](https://github.com/theJayTea/WritingTools/issues/34#issuecomment-2461633556)
-- [and it works if you disable Wayland for individual Flatpaks with Flatseal.](https://github.com/theJayTea/WritingTools/issues/93#issuecomment-2576511041)
+Writing Tools has a native Wayland backend. On Hyprland, install `xdg-desktop-portal-hyprland`, `wl-clipboard`, and `dbus-next` for global portal shortcuts, clipboard capture, and automatic paste. On other compositors the clipboard-first workflow remains available; copy the text before invoking Writing Tools and paste the result manually if the compositor does not provide an input injection path. X11 keeps the fully automatic Ctrl+C/Ctrl+V workflow.
 
 <a id="macos"></a>
 ### 🍎 macOS

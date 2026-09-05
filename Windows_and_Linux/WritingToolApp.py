@@ -21,6 +21,7 @@ from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from update_checker import UpdateChecker
+from platform_input import WaylandInputBackend, X11InputBackend
 
 _ = gettext.gettext
 
@@ -75,6 +76,11 @@ class WritingToolApp(QtWidgets.QApplication):
         self.output_queue = ""
         self.last_replace = 0
         self.hotkey_listener = None
+        self.input_backend = (
+            WaylandInputBackend(self)
+            if sys.platform.startswith('linux') and os.environ.get('XDG_SESSION_TYPE', '').lower() == 'wayland'
+            else X11InputBackend(self, pykeyboard, pyperclip)
+        )
         self.paused = False
         self.toggle_action = None
 
@@ -368,6 +374,17 @@ class WritingToolApp(QtWidgets.QApplication):
         two callbacks for the same combination anyway.
         """
         try:
+            if isinstance(self.input_backend, WaylandInputBackend):
+                shortcut_map = {'global': self.config.get('shortcut', 'ctrl+space')}
+                if self.options:
+                    for button_name, button_cfg in self.options.items():
+                        if button_name != 'Custom' and (button_cfg.get('hotkey') or '').strip():
+                            shortcut_map['button:' + button_name] = button_cfg['hotkey'].strip()
+                callbacks = {k: k for k in shortcut_map}
+                self.input_backend.set_callbacks(callbacks)
+                self.input_backend.register(shortcut_map)
+                self.registered_hotkey = self.config.get('shortcut', 'ctrl+space')
+                return
             if self.hotkey_listener is not None:
                 self.hotkey_listener.stop()
                 self.hotkey_listener = None
@@ -489,6 +506,14 @@ class WritingToolApp(QtWidgets.QApplication):
         # and routes window-mode options through the response window.
         self.process_option(button_name)
 
+    @Slot(str)
+    def handle_backend_shortcut(self, shortcut_id):
+        """Dispatch an activated Wayland portal shortcut on the Qt thread."""
+        if shortcut_id == 'global':
+            self.on_hotkey_pressed()
+        elif shortcut_id.startswith('button:'):
+            self._fire_button_directly(shortcut_id[7:])
+
     def register_hotkey(self):
         """
         Register the global hotkey for activating Writing Tools.
@@ -595,6 +620,14 @@ class WritingToolApp(QtWidgets.QApplication):
         pressed the hotkey without actually selecting anything, which
         `process_option_thread` reports as a normal error.
         """
+        if isinstance(self.input_backend, WaylandInputBackend):
+            def _read_wayland_clipboard():
+                with self._capture_lock:
+                    holder.text = self.input_backend.read_clipboard()
+                    holder.ready.set()
+            threading.Thread(target=_read_wayland_clipboard, daemon=True).start()
+            return
+
         try:
             clipboard_backup = pyperclip.paste()
         except Exception:
@@ -707,7 +740,11 @@ class WritingToolApp(QtWidgets.QApplication):
             # popup show became instant — we no longer have a way to detect
             # "user wants to chat" vs "capture failed", so we pick the safer
             # interpretation and surface the error.
-            self.show_message_signal.emit('Error', 'Please select text to use this option.')
+            detail = self.input_backend.diagnostics()
+            message = 'Copy the text you want to use before invoking Writing Tools.'
+            if detail:
+                message += '\n\n' + detail
+            self.show_message_signal.emit('Error', message)
             return
 
         if self.options[option]['open_in_window']:
@@ -812,20 +849,16 @@ class WritingToolApp(QtWidgets.QApplication):
                         })
                 else:
                     # For other options, use the original clipboard-based replacement
-                    clipboard_backup = pyperclip.paste()
+                    clipboard_backup = self.input_backend.read_clipboard()
                     cleaned_text = self.output_queue.rstrip('\n')
-                    pyperclip.copy(cleaned_text)
+                    self.input_backend.write_clipboard(cleaned_text)
                     
-                    kbrd = pykeyboard.Controller()
-                    def press_ctrl_v():
-                        kbrd.press(pykeyboard.Key.ctrl.value)
-                        kbrd.press('v')
-                        kbrd.release('v')
-                        kbrd.release(pykeyboard.Key.ctrl.value)
-
-                    press_ctrl_v()
+                    pasted = self.input_backend.paste()
                     time.sleep(0.2)
-                    pyperclip.copy(clipboard_backup)
+                    # Keep the generated result available when Wayland cannot
+                    # inject Ctrl+V; X11 restores the user's original clipboard.
+                    if pasted or not isinstance(self.input_backend, WaylandInputBackend):
+                        self.input_backend.write_clipboard(clipboard_backup)
 
                 if not hasattr(self, 'current_response_window'):
                     self.output_queue = ""

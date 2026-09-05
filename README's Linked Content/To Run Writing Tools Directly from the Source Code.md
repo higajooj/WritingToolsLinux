@@ -18,6 +18,8 @@ After extracting the folder, open your **Terminal** (or **Command Prompt**) in t
    ```bash
    cd /path/to/Windows_and_Linux
    pip3 install -r requirements.txt
+   # Wayland users should also install their compositor's portal backend
+   # and wl-clipboard (for Hyprland: xdg-desktop-portal-hyprland).
    ```
 Of course, you'll need to have [Python installed](https://www.python.org/downloads/)!
 
