@@ -21,9 +21,12 @@ After extracting the folder, open your **Terminal** (or **Command Prompt**) in t
    # Wayland users should also install their compositor's portal backend
    # and wl-clipboard (for Hyprland: xdg-desktop-portal-hyprland).
    ```
-   On Wayland, install the included `com.writingtools.WritingTools.desktop`
-   entry. It identifies Writing Tools to the portal and provides its icon.
-   Replace `/path/to/WritingTools` with your checkout path, then run:
+   On Wayland, Writing Tools creates
+   `~/.local/share/applications/com.writingtools.WritingTools.desktop` when
+   it first runs. The entry points to the Python interpreter and checkout that
+   launched it. The portal requires it for global shortcuts. An existing entry
+   stays unchanged. To install the bundled entry instead, replace its
+   `/path/to/WritingTools` placeholders, then run:
    ```bash
    mkdir -p ~/.local/share/applications
    cp com.writingtools.WritingTools.desktop ~/.local/share/applications/

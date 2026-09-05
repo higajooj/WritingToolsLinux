@@ -7,8 +7,10 @@ clipboard-first path when a compositor cannot inject input.
 
 import logging
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import threading
 
 from PySide6 import QtCore
@@ -21,6 +23,54 @@ MODIFIER_NAMES = {
     "ctrl": "CTRL", "control": "CTRL", "alt": "ALT", "shift": "SHIFT",
     "super": "SUPER", "meta": "SUPER", "win": "SUPER", "cmd": "SUPER",
 }
+
+
+def desktop_entry_path():
+    data_home = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(data_home, "applications", APP_ID + ".desktop")
+
+
+def desktop_entry_contents():
+    here = os.path.dirname(os.path.abspath(__file__))
+    executable = os.path.abspath(sys.executable)
+    if getattr(sys, "frozen", False):
+        exec_line = shlex.quote(executable)
+        icon = os.path.join(os.path.dirname(executable), "icons", "app_icon.png")
+    else:
+        exec_line = "{} {}".format(shlex.quote(executable), shlex.quote(os.path.join(here, "main.py")))
+        icon = os.path.join(here, "icons", "app_icon.png")
+    lines = [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Writing Tools",
+        "Comment=AI writing assistant",
+        "Exec=" + exec_line,
+    ]
+    if os.path.exists(icon):
+        lines.append("Icon=" + icon)
+    lines += ["Terminal=false", "Categories=Utility;", "StartupWMClass=" + APP_ID, ""]
+    return "\n".join(lines)
+
+
+def ensure_desktop_entry():
+    """Create the desktop entry required by the portal.
+
+    Keep an existing user or packaged entry. Return an error message if
+    creation fails.
+    """
+    path = desktop_entry_path()
+    if os.path.exists(path):
+        return ""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as entry:
+            entry.write(desktop_entry_contents())
+    except OSError as exc:
+        message = "Could not create desktop entry at {} ({}). Wayland global shortcuts require it.".format(path, exc)
+        logging.warning(message)
+        return message
+    logging.info("Installed desktop entry %s for portal app ID %s", path, APP_ID)
+    return ""
 
 
 class InputBackend:
@@ -67,6 +117,7 @@ class WaylandInputBackend(InputBackend):
         self._portal_loop = None
         self._portal_closed = None
         self._portal_error = None
+        self._entry_error = ""
         self._portal_token = 0
         self._bound_shortcuts = ()
         self._shortcut_callbacks = {}
@@ -93,6 +144,9 @@ class WaylandInputBackend(InputBackend):
             self._portal_error = "Install dbus-next to enable Wayland global shortcuts."
             logging.warning(self._portal_error)
             return
+
+        # The portal requires a desktop entry for this app ID.
+        self._entry_error = ensure_desktop_entry()
 
         # Re-registering closes the previous portal session.
         self.stop()
@@ -364,6 +418,8 @@ class WaylandInputBackend(InputBackend):
         problems = []
         if not self._has_wl_clipboard:
             problems.append("Install wl-clipboard (wl-copy and wl-paste) for clipboard workflows.")
+        if self._entry_error:
+            problems.append(self._entry_error)
         if self._portal_error:
             problems.append(self._portal_error)
         else:
