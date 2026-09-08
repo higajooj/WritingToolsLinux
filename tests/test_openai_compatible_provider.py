@@ -35,8 +35,8 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
         )
         self.provider = OpenAICompatibleProvider(self.app)
         self.config = {
-            "api_base": "http://127.0.0.1:18765/v1",
-            "api_model": "gpt-5.6-sol",
+            "api_base": "http://localhost:8000/v1",
+            "api_model": "local-model",
             "api_organisation": "",
             "api_project": "",
         }
@@ -86,6 +86,86 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
                     ])
                     self.app.output_ready_signal.emit.assert_called_with("Corrected text.")
         self.app.show_message_signal.emit.assert_not_called()
+
+    def test_official_openai_requests_use_the_saved_tier(self):
+        for base in ("https://api.openai.com/v1", "https://api.openai.com/v1/",
+                     "https://API.OPENAI.COM:443/v1"):
+            for tier, expected in (("priority", "priority"), ("default", "default"),
+                                   (None, "default"), ("invalid", "default")):
+                with self.subTest(base=base, tier=tier):
+                    self.provider.load_config(self.config | {
+                        "api_base": base, "api_key": "test-key", "service_tier": tier,
+                    })
+                    self.provider.get_response("Proofread.", "Text.", return_response=True)
+                    self.assertEqual(json.loads(self.requests[-1].content)["service_tier"], expected)
+        self.app.show_message_signal.emit.assert_not_called()
+
+    def test_missing_speed_does_not_retain_previous_fast_selection(self):
+        config = self.config | {"api_base": "https://api.openai.com/v1"}
+        self.provider.load_config(config | {"service_tier": "priority"})
+        self.provider.load_config(config)
+        self.provider.get_response("Proofread.", "Text.")
+        self.assertEqual(json.loads(self.requests[-1].content)["service_tier"], "default")
+
+    def test_custom_and_lookalike_endpoints_never_receive_a_tier(self):
+        for base in (
+            self.config["api_base"], "https://api.openai.com.example.test/v1",
+            "https://api.openai.com@other.example.test/v1", "http://api.openai.com/v1",
+            "https://api.openai.com:8443/v1", "https://api.openai.com/custom/v1",
+        ):
+            with self.subTest(base=base):
+                self.provider.load_config(self.config | {"api_base": base, "service_tier": "priority"})
+                self.provider.get_response("Proofread.", "Text.")
+                self.assertNotIn("service_tier", json.loads(self.requests[-1].content))
+        self.app.show_message_signal.emit.assert_not_called()
+
+    def test_speed_selector_tracks_url_and_survives_save_and_reopening(self):
+        self.app.providers = [self.provider]
+        self.app.config = {
+            "provider": self.provider.provider_name,
+            "providers": {self.provider.provider_name: self.config},
+        }
+        window = SettingsWindow(self.app, providers_only=True)
+        self.addCleanup(window.deleteLater)
+        dropdown = self.provider.speed_setting.dropdown
+        base_input = next(s.input for s in self.provider.settings if s.name == "api_base")
+        self.assertFalse(dropdown.isEnabled())
+        base_input.setText("https://api.openai.com/v1/")
+        self.assertTrue(dropdown.isEnabled())
+        dropdown.setCurrentIndex(dropdown.findData("priority"))
+        for base in ("https://api.openai.com.example.test/v1", self.config["api_base"],
+                     "https://api.openai.com:invalid/v1"):
+            base_input.setText(base)
+            self.assertFalse(dropdown.isEnabled())
+            self.assertEqual(dropdown.currentData(), "priority")
+        base_input.setText("https://api.openai.com/v1")
+        self.assertTrue(dropdown.isEnabled())
+        window.save_settings()
+        self.assertEqual(self.provider.service_tier, "priority")
+        for tier in ("priority", "default"):
+            with self.subTest(tier=tier):
+                window = SettingsWindow(self.app, providers_only=False)
+                self.addCleanup(window.deleteLater)
+                self.assertEqual(self.provider.speed_setting.get_value(), "priority")
+                dropdown = self.provider.speed_setting.dropdown
+                dropdown.setCurrentIndex(dropdown.findData(tier))
+                window.save_settings()
+                saved = self.app.config["providers"][self.provider.provider_name]
+                restarted = OpenAICompatibleProvider(self.app)
+                restarted.load_config(saved)
+                restarted.get_response("Proofread.", "Text.")
+                self.assertEqual(json.loads(self.requests[-1].content)["service_tier"], tier)
+
+    def test_fast_failure_is_reported_without_retrying_at_standard(self):
+        with patch.object(self, "respond", return_value=httpx.Response(
+            400, json={"error": {"message": "Unsupported service tier"}},
+        )) as respond:
+            self.provider.load_config(self.config | {
+                "api_base": "https://api.openai.com/v1", "service_tier": "priority",
+            })
+            self.assertEqual(self.provider.get_response("Proofread.", "Text."), "")
+        respond.assert_called_once()
+        self.app.show_message_signal.emit.assert_called_once()
 
     def test_provided_key_is_sent_as_bearer(self):
         self.provider.load_config(self.config | {"api_key": "  provided-key  "})

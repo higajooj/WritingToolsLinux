@@ -184,6 +184,7 @@ class CodexAppServerClient:
         base_instructions: str,
         developer_instructions: str,
         input_text: str,
+        service_tier: str | None = None,
         on_started: Callable[[str, str], None] | None = None,
     ) -> str:
         """Run one isolated turn and return its final assistant message."""
@@ -217,15 +218,19 @@ class CodexAppServerClient:
         unsubscribe = self.on("turn/completed", handle_completed)
         turn_id = None
         try:
+            turn_params = {
+                "threadId": thread_id,
+                "input": [{"type": "text", "text": input_text}],
+                "approvalPolicy": "never",
+                "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
+                "summary": "none",
+            }
+            if service_tier is not None:
+                # An explicit "default" prevents inheriting a Fast thread tier.
+                turn_params["serviceTierForTurn"] = service_tier
             turn_result = self._request_started(
                 "turn/start",
-                {
-                    "threadId": thread_id,
-                    "input": [{"type": "text", "text": input_text}],
-                    "approvalPolicy": "never",
-                    "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
-                    "summary": "none",
-                },
+                turn_params,
             )
             try:
                 turn_id = turn_result["turn"]["id"]

@@ -184,14 +184,16 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
         self.assertEqual(result, "Edited response")
         turn = self.client.turns[0]
         self.assertEqual(turn["model"], "gpt-first")
+        self.assertEqual(turn["service_tier"], "default")
         self.assertIn("Use plain English.", turn["developer_instructions"])
         self.assertIn("Keep it concise.", turn["developer_instructions"])
         history = json.loads(turn["input_text"].split("Conversation JSON:\n", 1)[1])
         self.assertEqual(history, messages[1:])
         self.app.output_ready_signal.emit.assert_not_called()
 
-    def test_only_model_choice_is_saved(self):
+    def test_only_model_and_speed_choices_are_saved(self):
         self.provider.model = "gpt-first"
+        self.provider.service_tier = "priority"
         self.provider.account = {
             "type": "chatgpt",
             "email": "private@example.test",
@@ -201,8 +203,59 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
 
         self.assertEqual(
             self.app.config["providers"][self.provider.provider_name],
-            {"model": "gpt-first"},
+            {"model": "gpt-first", "service_tier": "priority"},
         )
+
+    def test_saved_speed_applies_to_automatic_and_explicit_models(self):
+        self.client.account = {"type": "chatgpt"}
+        for model in ("", "gpt-first"):
+            for tier in ("priority", "default"):
+                with self.subTest(model=model, tier=tier):
+                    self.provider.load_config({"model": model, "service_tier": tier})
+                    self.assertEqual(
+                        self.provider.get_response("Proofread.", "Text", return_response=True),
+                        "Edited response",
+                    )
+                    self.assertEqual(self.client.turns[-1]["model"], model)
+                    self.assertEqual(self.client.turns[-1]["service_tier"], tier)
+
+    def test_missing_or_invalid_speed_resets_to_standard(self):
+        for config in ({}, {"service_tier": None}, {"service_tier": "invalid"}):
+            with self.subTest(config=config):
+                self.provider.service_tier = "priority"
+                self.provider.load_config(config)
+                self.assertEqual(self.provider.service_tier, "default")
+
+    def test_speed_survives_settings_save_restart_and_widget_recreation(self):
+        self.client.account = {"type": "chatgpt"}
+        window = self._settings_window()
+        self.wait_for(lambda: self.provider.auth_state == "signed_in")
+        for tier in ("priority", "default"):
+            with self.subTest(tier=tier):
+                dropdown = self.provider.settings_widget.speed_setting.dropdown
+                dropdown.setCurrentIndex(dropdown.findData(tier))
+                window.save_settings()
+                saved = self.app.config["providers"][self.provider.provider_name]
+                self.assertEqual(saved["service_tier"], tier)
+                restarted = OpenAISubscriptionProvider(self.app, client=self.client)
+                restarted.load_config(saved)
+                self.assertEqual(restarted.service_tier, tier)
+                self.provider.settings_widget.deleteLater()
+                QApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+                self.assertIsNone(self.provider.settings_widget)
+                window = SettingsWindow(self.app, providers_only=True)
+                self.addCleanup(window.deleteLater)
+                self.assertEqual(self.provider.settings_widget.selected_service_tier(), tier)
+                self.wait_for(lambda: self.provider.auth_state == "signed_in")
+
+    def test_fast_failure_does_not_retry_at_standard_speed(self):
+        self.client.account = {"type": "chatgpt"}
+        self.client.turn_error = CodexTurnError("Unsupported service tier")
+        self.provider.load_config({"service_tier": "priority"})
+        self.assertEqual(self.provider.get_response("Proofread.", "Text"), "")
+        self.assertEqual(len(self.client.turns), 1)
+        self.assertEqual(self.client.turns[0]["service_tier"], "priority")
+        self.app.show_message_signal.emit.assert_called_once()
 
     def test_unavailable_saved_model_falls_back_to_automatic(self):
         self.provider.model = "retired-model"

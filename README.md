@@ -65,28 +65,25 @@ is managed by Codex and is not stored in `config.json`. See OpenAI's official
 [Codex CLI documentation](https://learn.chatgpt.com/docs/codex/cli) for current
 installation and subscription details.
 
-## Using claude-code-proxy
+### OpenAI processing speed
 
-Writing Tools can connect to a local `claude-code-proxy` through the **OpenAI Compatible (For Experts)** provider. Sign in to your upstream provider through the proxy first, then start (or restart) the proxy with its OpenAI-compatible routes enabled:
+Choose **Standard** or **Fast (priority)** in the **Speed** selector, independently
+of the model. Standard is the default, including for existing configurations.
+The choice is saved separately for each provider and applies to writing actions
+and follow-up chat.
 
-```sh
-CCP_CODEX_RESPONSES_API=1 claude-code-proxy serve
-```
+- **OpenAI Subscription (ChatGPT):** Speed applies to the selected model or
+  **Automatic**. Fast uses more ChatGPT credits. The explicit speed override was
+  verified against Codex CLI **0.153.4**; update Codex if using an older version.
+- **OpenAI Compatible (For Experts):** Speed is available when the API Base URL
+  is `https://api.openai.com/v1` (a trailing slash is accepted). Fast costs more.
+  Other compatible servers do not receive a speed parameter. Servers without
+  authentication can still use an empty API key.
 
-In Writing Tools' AI setup or Settings, enter:
-
-| Setting | Value |
-| --- | --- |
-| API Base URL | `http://127.0.0.1:18765/v1` |
-| API Key | Leave blank |
-| API Model | `gpt-5.6-sol`, or another ID listed by `claude-code-proxy models` |
-| API Organisation / API Project | Leave blank |
-
-An empty API key sends requests without an Authorization header. The proxy handles upstream authentication. Other OpenAI-compatible servers that require a key still use the key entered in Settings.
-
-If requests return HTTP 404, check that the proxy was started with `CCP_CODEX_RESPONSES_API=1` and that the base URL ends in `/v1`, without `/chat/completions`. Older Writing Tools versions that require a key can use `unused` as a placeholder; the proxy ignores incoming bearer credentials.
-
-Known proxy limitation: with claude-code-proxy 0.1.35 and the Codex backend, follow-up chat can fail with `Invalid value: 'input_text'`. The proxy translates assistant history into the wrong upstream content type. Single-request writing actions work; follow-up chat requires a fix in the proxy.
+Fast availability depends on the model and account, and requesting it does not
+guarantee priority processing. Requests use the `priority` service tier, which
+OpenAI supports for [Fast mode](https://developers.openai.com/api/docs/guides/fast-mode).
+See also [Codex speed and credit usage](https://learn.chatgpt.com/docs/agent-configuration/speed).
 
 
 ## Development

@@ -40,6 +40,7 @@ import threading
 import webbrowser
 from abc import ABC, abstractmethod
 from typing import List
+from urllib.parse import urlsplit
 
 # External libraries
 from google import genai
@@ -253,6 +254,32 @@ class DropdownSetting(AIProviderSetting):
         if self.allow_custom and self.dropdown.currentData() == self._CUSTOM_SENTINEL:
             return self.custom_input.text().strip()
         return self.dropdown.currentData()
+
+
+class ServiceTierSetting(DropdownSetting):
+    """A saved processing speed, independent of the selected OpenAI model."""
+
+    def __init__(self, description):
+        super().__init__(
+            "service_tier", "Speed", "default", description,
+            options=[("Standard", "default"), ("Fast (priority)", "priority")],
+        )
+
+    @staticmethod
+    def normalize(value):
+        return "priority" if value == "priority" else "default"
+
+    def set_value(self, value):
+        super().set_value(self.normalize(value))
+
+    def render_to_layout(self, layout):
+        super().render_to_layout(layout)
+        description = QtWidgets.QLabel(self.description)
+        description.setWordWrap(True)
+        description.setStyleSheet(
+            f"font-size: 13px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+        )
+        layout.addWidget(description)
 
 
 class AIProvider(ABC):
@@ -541,6 +568,10 @@ class OpenAICompatibleProvider(AIProvider):
     def __init__(self, app):
         self.close_requested = None
         self.client = None
+        self.speed_setting = ServiceTierSetting(
+            "Speed selection is available for the official OpenAI API. "
+            "Fast costs more and depends on model and account availability."
+        )
 
         settings = [
             TextSetting(name="api_key", display_name="API Key", description="Leave blank if your server does not require authentication."),
@@ -548,11 +579,39 @@ class OpenAICompatibleProvider(AIProvider):
             TextSetting("api_organisation", "API Organisation", "", "Leave blank if not applicable."),
             TextSetting("api_project", "API Project", "", "Leave blank if not applicable."),
             TextSetting("api_model", "API Model", "gpt-4o-mini", "E.g. gpt-4o-mini"),
+            self.speed_setting,
         ]
         super().__init__(app, "OpenAI Compatible (For Experts)", settings,
             "• Connect to ANY OpenAI-compatible API (v1/chat/completions).\n"
             "• You must abide by the service's Terms of Service.",
             "openai", "Get OpenAI API Key", lambda: webbrowser.open("https://platform.openai.com/account/api-keys"))
+
+    @staticmethod
+    def _is_openai_api(base_url):
+        try:
+            url = urlsplit((base_url or "").strip())
+            return (
+                url.scheme == "https" and url.hostname == "api.openai.com"
+                and url.port in (None, 443) and url.path in ("/v1", "/v1/")
+                and url.username is None and url.password is None
+                and not url.query and not url.fragment
+            )
+        except ValueError:
+            return False
+
+    def load_config(self, config: dict):
+        super().load_config(config | {
+            "service_tier": ServiceTierSetting.normalize(config.get("service_tier")),
+        })
+
+    def render_settings(self, layout: QVBoxLayout, config: dict):
+        super().render_settings(layout, config)
+        base_setting = next(setting for setting in self.settings if setting.name == "api_base")
+        dropdown = self.speed_setting.dropdown
+        dropdown.setEnabled(self._is_openai_api(base_setting.input.text()))
+        base_setting.input.textChanged.connect(
+            lambda value: dropdown.setEnabled(self._is_openai_api(value))
+        )
 
     def get_response(self, system_instruction: str, prompt: str | list, return_response: bool = False) -> str:
         """
@@ -574,11 +633,13 @@ class OpenAICompatibleProvider(AIProvider):
             ]
 
         try:
+            tier_params = {"service_tier": self.service_tier} if self._is_openai_api(self.api_base) else {}
             response = self.client.chat.completions.create(
                 model=self.api_model,
                 messages=messages,
                 stream=False,
-                extra_headers={"Authorization": Omit()} if not self.api_key else {}
+                extra_headers={"Authorization": Omit()} if not self.api_key else {},
+                **tier_params,
             )
             response_text = response.choices[0].message.content.strip()
 
@@ -693,6 +754,12 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
         self.model_warning.hide()
         layout.addWidget(self.model_warning)
 
+        self.speed_setting = ServiceTierSetting(
+            "Fast uses more ChatGPT credits and depends on model and account availability."
+        )
+        self.speed_setting.set_value(self.provider.service_tier)
+        self.speed_setting.render_to_layout(layout)
+
         self.login_button.clicked.connect(self.provider.login_async)
         self.cancel_button.clicked.connect(self.provider.cancel_login_async)
         self.logout_button.clicked.connect(self.provider.logout_async)
@@ -710,6 +777,9 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
 
     def selected_model(self):
         return self.model_dropdown.currentData() or ""
+
+    def selected_service_tier(self):
+        return self.speed_setting.get_value()
 
     @QtCore.Slot()
     def _model_selected(self):
@@ -789,6 +859,7 @@ class OpenAISubscriptionProvider(AIProvider):
         self.close_requested = False
         self.client = client or CodexAppServerClient(codex_data_root())
         self.model = ""
+        self.service_tier = "default"
         self.models = []
         self.account = None
         self.auth_state = "idle"
@@ -820,17 +891,21 @@ class OpenAISubscriptionProvider(AIProvider):
 
     def load_config(self, config: dict):
         self.model = (config.get("model") or "").strip()
+        self.service_tier = ServiceTierSetting.normalize(config.get("service_tier"))
 
     def save_config(self):
         if self.settings_widget is not None:
             self.model = self.settings_widget.selected_model()
+            self.service_tier = self.settings_widget.selected_service_tier()
         self.app.config.setdefault("providers", {})[self.provider_name] = {
-            "model": self.model
+            "model": self.model,
+            "service_tier": self.service_tier,
         }
         self.app.save_config(self.app.config)
 
     def render_settings(self, layout: QVBoxLayout, config: dict):
         self.model = (config.get("model") or self.model or "").strip()
+        self.service_tier = ServiceTierSetting.normalize(config.get("service_tier", self.service_tier))
         self._settings_widget_token += 1
         token = self._settings_widget_token
         widget = _CodexSettingsWidget(self)
@@ -1011,6 +1086,7 @@ class OpenAISubscriptionProvider(AIProvider):
                 base_instructions=self.BASE_INSTRUCTIONS,
                 developer_instructions=developer_instructions,
                 input_text=input_text,
+                service_tier=self.service_tier,
                 on_started=turn_started,
             )
             # The interrupt can lose the race with a turn that was already
