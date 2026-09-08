@@ -11,6 +11,11 @@ tests are in `tests/`.
 
 ## Run
 
+Install `wl-clipboard`, `xdg-desktop-portal`, and your compositor's portal
+backend. For Hyprland, use `xdg-desktop-portal-hyprland`.
+
+From the repository root, create a virtual environment and install dependencies:
+
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
@@ -18,14 +23,94 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-Install `wl-clipboard`, `xdg-desktop-portal`, and your compositor's portal
-backend. For Hyprland, use `xdg-desktop-portal-hyprland`.
+With the virtual environment active, you can also launch the root `main.py`
+by absolute path from any directory.
 
 Configure your provider in the initial setup or Settings. The default shortcut
-is `ctrl+space`; change it if it conflicts with another application. wlroots
-compositors also need a shortcut binding in their configuration. See the
-[source and desktop setup guide](README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
-for shortcut bindings and popup window rules.
+is `ctrl+space`; change it if it conflicts with another application. See
+[Shortcuts](#shortcuts) for compositor bindings and
+[Popup window rules](#popup-window-rules) for tiling desktop setup.
+
+## Desktop integration
+
+Writing Tools creates
+`~/.local/share/applications/com.writingtools.WritingTools.desktop` on first
+launch, using `$XDG_DATA_HOME/applications` instead if `XDG_DATA_HOME` is an
+absolute path. It points to the interpreter and checkout used to launch the
+app. Existing entries are left unchanged. The GlobalShortcuts portal requires
+this entry to bind shortcuts.
+
+After relocating a checkout, update the existing entry's `Exec` and `Icon`
+paths, or delete it and relaunch to have a fresh one written.
+
+## Shortcuts
+
+Shortcut registration uses the desktop portal and requires a backend that
+supports GlobalShortcuts. Copy text before invoking Writing Tools: the app
+cannot read another application's selection on Wayland. If automatic pasting
+is unavailable, the result stays on the clipboard for you to paste manually.
+
+On desktops that handle shortcut assignment through the portal, configure the
+shortcut when prompted. Hyprland requires a binding in its own configuration.
+Writing Tools registers `com.writingtools.WritingTools:global` and
+`com.writingtools.WritingTools:button:<Name>` for each button hotkey and logs
+the required bindings at startup.
+
+For Hyprland's `hyprland.conf`, bind Super+P with:
+
+```ini
+bind = SUPER, P, global, com.writingtools.WritingTools:global
+```
+
+Reload with `hyprctl reload`. Run `hyprctl globalshortcuts` while Writing Tools
+is open to inspect registered IDs. If none appear, check the application log
+for portal registration failures. See Hyprland's
+[global shortcut documentation](https://wiki.hypr.land/configuring/core/binds/globals/)
+for Lua configuration and further details.
+
+## Popup window rules
+
+The shortcut popup is a frameless top-level window whose placement is managed
+by the compositor on Wayland. In a tiling compositor, match both its app ID
+(`com.writingtools.WritingTools`) and title (`Writing Tools`) to float the popup
+without affecting the settings, about, or response windows.
+
+For Hyprland's Lua configuration (`hyprland.lua`):
+
+```lua
+hl.window_rule({
+    name  = "writing-tools-popup",
+    match = { class = [[^com\.writingtools\.WritingTools$]], title = [[^Writing Tools$]] },
+    float = true,
+    move  = { "cursor_x", "cursor_y+20" },
+})
+```
+
+For `hyprland.conf` using the Hyprland 0.54 window-rule syntax:
+
+```ini
+windowrule {
+    name = writing-tools-popup
+    match:class = ^com\.writingtools\.WritingTools$
+    match:title = ^Writing Tools$
+    float = on
+    move = cursor_x (cursor_y+20)
+}
+```
+
+These rules place the popup just below the pointer using Hyprland's cursor
+coordinates. Reload with `hyprctl reload`. See the official window-rule
+documentation for [Lua](https://wiki.hypr.land/Configuring/Basics/Window-Rules/)
+or [Hyprland 0.54](https://wiki.hypr.land/0.54.0/Configuring/Window-Rules/).
+
+For sway, add this to your configuration to float the popup:
+
+```ini
+for_window [app_id="^com\.writingtools\.WritingTools$" title="^Writing Tools$"] floating enable
+```
+
+See sway's [configuration reference](https://github.com/swaywm/sway/blob/master/sway/sway.5.scd)
+for window criteria and rules. Other compositors need their own equivalent.
 
 ## Features and configuration
 
@@ -37,9 +122,10 @@ for shortcut bindings and popup window rules.
 - Browser-based ChatGPT subscription sign-in through the official Codex CLI.
 
 Settings, including provider credentials, are stored locally in the ignored
-`config.json`. Keep it private. Text is sent to the provider you configure
-when you invoke writing actions; local providers can keep processing on your
-machine.
+`config.json` beside `main.py`. Keep it private. Custom buttons and their
+shortcuts are stored in the root `options.json`. Text is sent to the provider
+you configure when you invoke writing actions; local providers can keep
+processing on your machine.
 
 For Ollama, start the server, download a model, and select the Ollama provider
 in Settings with that model's name. Alternatively, use the OpenAI-compatible
@@ -95,6 +181,7 @@ QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
 ```
 
 Update with `git pull`, then reinstall dependencies if `requirements.txt` changed.
+Preserve `config.json` and any customizations to `options.json` when updating.
 
 ## Credits
 
