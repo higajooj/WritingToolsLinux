@@ -159,14 +159,19 @@ The choice is saved separately for each provider and applies to writing actions
 and follow-up chat.
 
 - **OpenAI Subscription (ChatGPT):** Speed applies to the selected model or
-  **Automatic**. Fast uses more ChatGPT credits. The explicit speed override was
-  verified against Codex CLI **0.153.4**; update Codex if using an older version.
+  **Automatic**. Fast uses more ChatGPT credits. Codex reports the speeds each
+  model supports, so the selector greys out on a model that offers only
+  Standard; **Automatic** always offers both. Every request states its speed
+  explicitly. The override was verified against Codex CLI **0.153.4**; update
+  Codex if using an older version.
 - **OpenAI Compatible (For Experts):** Speed is available when the API Base URL
-  is `https://api.openai.com/v1` (a trailing slash is accepted). Fast costs more.
-  Other compatible servers do not receive a speed parameter. Servers without
-  authentication can still use an empty API key.
+  is `https://api.openai.com/v1` (a trailing slash is accepted); the selector
+  greys out for any other server, which receives no speed parameter. Fast costs
+  more. Standard sends no speed parameter either, so the tier configured in your
+  OpenAI Project still applies. Servers without authentication can still use an
+  empty API key.
 
-Fast availability depends on the model and account, and requesting it does not
+Fast availability also depends on the account, and requesting it does not
 guarantee priority processing. Requests use the `priority` service tier, which
 OpenAI supports for [Fast mode](https://developers.openai.com/api/docs/guides/fast-mode).
 See also [Codex speed and credit usage](https://learn.chatgpt.com/docs/agent-configuration/speed).

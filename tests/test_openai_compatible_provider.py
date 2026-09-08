@@ -87,17 +87,22 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
                     self.app.output_ready_signal.emit.assert_called_with("Corrected text.")
         self.app.show_message_signal.emit.assert_not_called()
 
-    def test_official_openai_requests_use_the_saved_tier(self):
+    def test_official_openai_requests_ask_for_fast_only_when_it_is_saved(self):
+        # Standard leaves the parameter out so the OpenAI Project's own tier
+        # setting still decides; only Fast is requested explicitly.
         for base in ("https://api.openai.com/v1", "https://api.openai.com/v1/",
                      "https://API.OPENAI.COM:443/v1"):
-            for tier, expected in (("priority", "priority"), ("default", "default"),
-                                   (None, "default"), ("invalid", "default")):
+            for tier in ("priority", "default", None, "invalid"):
                 with self.subTest(base=base, tier=tier):
                     self.provider.load_config(self.config | {
                         "api_base": base, "api_key": "test-key", "service_tier": tier,
                     })
                     self.provider.get_response("Proofread.", "Text.", return_response=True)
-                    self.assertEqual(json.loads(self.requests[-1].content)["service_tier"], expected)
+                    body = json.loads(self.requests[-1].content)
+                    if tier == "priority":
+                        self.assertEqual(body["service_tier"], "priority")
+                    else:
+                        self.assertNotIn("service_tier", body)
         self.app.show_message_signal.emit.assert_not_called()
 
     def test_missing_speed_does_not_retain_previous_fast_selection(self):
@@ -105,7 +110,7 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
         self.provider.load_config(config | {"service_tier": "priority"})
         self.provider.load_config(config)
         self.provider.get_response("Proofread.", "Text.")
-        self.assertEqual(json.loads(self.requests[-1].content)["service_tier"], "default")
+        self.assertNotIn("service_tier", json.loads(self.requests[-1].content))
 
     def test_custom_and_lookalike_endpoints_never_receive_a_tier(self):
         for base in (
@@ -151,10 +156,15 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
                 dropdown.setCurrentIndex(dropdown.findData(tier))
                 window.save_settings()
                 saved = self.app.config["providers"][self.provider.provider_name]
+                self.assertEqual(saved["service_tier"], tier)
                 restarted = OpenAICompatibleProvider(self.app)
                 restarted.load_config(saved)
                 restarted.get_response("Proofread.", "Text.")
-                self.assertEqual(json.loads(self.requests[-1].content)["service_tier"], tier)
+                body = json.loads(self.requests[-1].content)
+                if tier == "priority":
+                    self.assertEqual(body["service_tier"], "priority")
+                else:
+                    self.assertNotIn("service_tier", body)
 
     def test_fast_failure_is_reported_without_retrying_at_standard(self):
         with patch.object(self, "respond", return_value=httpx.Response(

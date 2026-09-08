@@ -248,6 +248,54 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
                 self.assertEqual(self.provider.settings_widget.selected_service_tier(), tier)
                 self.wait_for(lambda: self.provider.auth_state == "signed_in")
 
+    def test_fast_is_offered_unless_the_model_reports_it_is_unsupported(self):
+        self.client.models_pages = [[
+            {"model": "gpt-fast", "serviceTiers": [{"id": "default"}, {"id": "priority"}]},
+            {"model": "gpt-standard-only", "serviceTiers": [{"id": "default"}]},
+            {"model": "gpt-deprecated-field", "additionalSpeedTiers": ["priority"]},
+            # Older Codex builds report no tiers at all.
+            {"model": "gpt-silent"},
+        ]]
+        self.client.account = {"type": "chatgpt"}
+        self._settings_window()
+        widget = self.provider.settings_widget
+        self.wait_for(lambda: widget.model_dropdown.findData("gpt-silent") != -1)
+
+        for model, supported in (
+            ("", True), ("gpt-fast", True), ("gpt-deprecated-field", True),
+            ("gpt-silent", True), ("gpt-standard-only", False),
+        ):
+            with self.subTest(model=model):
+                widget.model_dropdown.setCurrentIndex(widget.model_dropdown.findData(model))
+                dropdown = widget.speed_setting.dropdown
+                self.assertEqual(dropdown.isEnabled(), supported)
+                self.assertEqual(widget.speed_warning.isVisibleTo(widget), not supported)
+
+    def test_saved_fast_falls_back_to_standard_on_a_model_without_it(self):
+        self.client.models_pages = [[
+            {"model": "gpt-standard-only", "serviceTiers": [{"id": "default"}]},
+            {"model": "gpt-fast", "serviceTiers": [{"id": "priority"}]},
+        ]]
+        self.client.account = {"type": "chatgpt"}
+        window = self._settings_window(
+            {"model": "gpt-standard-only", "service_tier": "priority"}
+        )
+        widget = self.provider.settings_widget
+        self.wait_for(lambda: widget.model_dropdown.findData("gpt-fast") != -1)
+
+        self.assertEqual(widget.selected_service_tier(), "default")
+        self.assertFalse(widget.speed_setting.dropdown.isEnabled())
+        self.assertTrue(widget.speed_warning.isVisibleTo(widget))
+
+        self.wait_for(lambda: self.provider.auth_state == "signed_in")
+        window.save_settings()
+        saved = self.app.config["providers"][self.provider.provider_name]
+        self.assertEqual(saved, {"model": "gpt-standard-only", "service_tier": "default"})
+
+        widget.model_dropdown.setCurrentIndex(widget.model_dropdown.findData("gpt-fast"))
+        self.assertTrue(widget.speed_setting.dropdown.isEnabled())
+        self.assertFalse(widget.speed_warning.isVisibleTo(widget))
+
     def test_fast_failure_does_not_retry_at_standard_speed(self):
         self.client.account = {"type": "chatgpt"}
         self.client.turn_error = CodexTurnError("Unsupported service tier")
@@ -291,11 +339,13 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
         self.provider.before_load()
         self.assertTrue(self.client.shutdown_called)
 
-    def _settings_window(self):
+    def _settings_window(self, provider_config=None):
         self.app.providers = [self.provider]
         self.app.config = {
             "provider": self.provider.provider_name,
-            "providers": {self.provider.provider_name: {"model": ""}},
+            "providers": {
+                self.provider.provider_name: provider_config or {"model": ""},
+            },
         }
         self.app.create_tray_icon = Mock()
         self.app.register_hotkey = Mock()

@@ -175,12 +175,22 @@ class DropdownSetting(AIProviderSetting):
         label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode=='dark' else '#333333'};")
         row_layout.addWidget(label)
         self.dropdown = QtWidgets.QComboBox()
+        # The disabled rule is required: a bare property block pins `color`, so
+        # Qt cannot grey the text out and a disabled dropdown would look exactly
+        # like an enabled one.
         self.dropdown.setStyleSheet(f"""
-            font-size: 16px;
-            padding: 5px;
-            background-color: {'#444' if colorMode=='dark' else 'white'};
-            color: {'#ffffff' if colorMode=='dark' else '#000000'};
-            border: 1px solid {'#666' if colorMode=='dark' else '#ccc'};
+            QComboBox {{
+                font-size: 16px;
+                padding: 5px;
+                background-color: {'#444' if colorMode=='dark' else 'white'};
+                color: {'#ffffff' if colorMode=='dark' else '#000000'};
+                border: 1px solid {'#666' if colorMode=='dark' else '#ccc'};
+            }}
+            QComboBox:disabled {{
+                background-color: {'#3a3a3a' if colorMode=='dark' else '#f0f0f0'};
+                color: {'#888888' if colorMode=='dark' else '#999999'};
+                border: 1px solid {'#555' if colorMode=='dark' else '#ddd'};
+            }}
         """)
 
         # Add preset options
@@ -633,7 +643,15 @@ class OpenAICompatibleProvider(AIProvider):
             ]
 
         try:
-            tier_params = {"service_tier": self.service_tier} if self._is_openai_api(self.api_base) else {}
+            # Standard omits the parameter so the OpenAI Project's configured
+            # tier still applies; only Fast is requested explicitly. The Codex
+            # provider deliberately differs: there an explicit "default" is how
+            # the protocol says to avoid inheriting the thread's tier.
+            tier_params = (
+                {"service_tier": "priority"}
+                if self.service_tier == "priority" and self._is_openai_api(self.api_base)
+                else {}
+            )
             response = self.client.chat.completions.create(
                 model=self.api_model,
                 messages=messages,
@@ -688,6 +706,7 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
     def __init__(self, provider):
         super().__init__()
         self.provider = provider
+        self.models_by_id = {}
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -760,6 +779,14 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
         self.speed_setting.set_value(self.provider.service_tier)
         self.speed_setting.render_to_layout(layout)
 
+        self.speed_warning = QtWidgets.QLabel(
+            "The selected model does not offer Fast. Standard will be used."
+        )
+        self.speed_warning.setWordWrap(True)
+        self.speed_warning.setStyleSheet("font-size: 13px; color: #d97706;")
+        self.speed_warning.hide()
+        layout.addWidget(self.speed_warning)
+
         self.login_button.clicked.connect(self.provider.login_async)
         self.cancel_button.clicked.connect(self.provider.cancel_login_async)
         self.logout_button.clicked.connect(self.provider.logout_async)
@@ -784,6 +811,31 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
     @QtCore.Slot()
     def _model_selected(self):
         self.provider.model = self.selected_model()
+        self._update_speed_availability()
+
+    def _supports_fast(self, model_id):
+        """Whether the model advertises the Fast (priority) service tier.
+
+        Codex reports the tiers per model rather than as a fixed set, so the
+        answer is only trusted when a listed model actually names some. An
+        unknown selection, Automatic, or a server that reports no tiers at all
+        keeps Fast on offer: silence must not remove a working option.
+        """
+        model = self.models_by_id.get(model_id)
+        if not model:
+            return True
+        tiers = [tier.get("id") for tier in model.get("serviceTiers") or []]
+        # additionalSpeedTiers is the deprecated spelling of the same list.
+        tiers += list(model.get("additionalSpeedTiers") or [])
+        return "priority" in tiers if tiers else True
+
+    def _update_speed_availability(self):
+        supported = self._supports_fast(self.selected_model())
+        dropdown = self.speed_setting.dropdown
+        if not supported and dropdown.currentData() == "priority":
+            dropdown.setCurrentIndex(dropdown.findData("default"))
+        dropdown.setEnabled(supported)
+        self.speed_warning.setVisible(not supported)
 
     @QtCore.Slot(object)
     def apply_status(self, status):
@@ -806,6 +858,7 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
         models = payload.get("models") or []
         authoritative = payload.get("authoritative", True)
         configured_model = self.provider.model or ""
+        self.models_by_id = {}
         self.model_dropdown.blockSignals(True)
         self.model_dropdown.clear()
         self.model_dropdown.addItem("Automatic (Codex default)", "")
@@ -815,6 +868,7 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
             if not model_id or model_id in available:
                 continue
             available.add(model_id)
+            self.models_by_id[model_id] = model
             self.model_dropdown.addItem(model.get("displayName") or model_id, model_id)
 
         index = self.model_dropdown.findData(configured_model)
@@ -831,6 +885,10 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
             self.model_warning.show()
         else:
             self.model_warning.hide()
+
+        # setCurrentIndex above runs with signals blocked, so the speed state
+        # has to be refreshed by hand once the selection has settled.
+        self._update_speed_availability()
 
 
 class OpenAISubscriptionProvider(AIProvider):
