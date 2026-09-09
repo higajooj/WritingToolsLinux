@@ -365,8 +365,12 @@ class WaylandInputBackend:
         if not self._has_wl_clipboard:
             return False
         try:
+            # wl-copy forks a daemon that keeps owning the selection and inherits
+            # our stdio. Pipes (capture_output) would never see EOF, so run() would
+            # block until `timeout` and report a failed copy that actually worked.
             result = subprocess.run(
-                ["wl-copy"], input=text, text=True, capture_output=True, timeout=2
+                ["wl-copy"], input=text, text=True, timeout=2,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             return result.returncode == 0
         except (OSError, subprocess.SubprocessError):
