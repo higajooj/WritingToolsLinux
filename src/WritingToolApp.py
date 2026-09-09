@@ -58,7 +58,7 @@ class WritingToolApp(QtWidgets.QApplication):
         self.setDesktopFileName(APP_ID)
         self.current_response_window = None
         logging.debug('Initializing WritingToolApp')
-        self.output_ready_signal.connect(self.replace_text)
+        self.output_ready_signal.connect(self.handle_output_ready)
         self.show_message_signal.connect(self.show_message_box)
         self.hotkey_triggered_signal.connect(self.on_hotkey_pressed)
         self.config = None
@@ -78,8 +78,6 @@ class WritingToolApp(QtWidgets.QApplication):
         self.settings_window = None
         self.about_window = None
         self.registered_hotkey = None
-        self.output_queue = ""
-        self.last_replace = 0
         self.input_backend = WaylandInputBackend(self)
         self.paused = False
         self.toggle_action = None
@@ -437,7 +435,6 @@ class WritingToolApp(QtWidgets.QApplication):
         elif shortcut_id.startswith('button:'):
             if self.current_provider:
                 self.current_provider.cancel()
-                self.output_queue = ""
             self._fire_button_directly(shortcut_id[7:])
 
     def register_hotkey(self):
@@ -464,7 +461,6 @@ class WritingToolApp(QtWidgets.QApplication):
         if self.current_provider:
             logging.debug("Cancelling current provider's request")
             self.current_provider.cancel()
-            self.output_queue = ""
 
         # noinspection PyTypeChecker
         QtCore.QMetaObject.invokeMethod(self, "_show_popup", QtCore.Qt.ConnectionType.QueuedConnection)
@@ -570,7 +566,7 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         Worker: wait for the background clipboard capture to land, then
         either open a response window (for window-mode options) or set up
-        for inline replacement, and finally run the AI request.
+        for clipboard output, and finally run the AI request.
         """
         logging.debug(f'Starting processing thread for option: {option}')
 
@@ -613,8 +609,6 @@ class WritingToolApp(QtWidgets.QApplication):
             else:
                 prompt = f"{prompt_prefix}{selected_text}"
 
-            self.output_queue = ""
-
             logging.debug(f'Getting response from provider for option: {option}')
 
             if self.options[option]['open_in_window']:
@@ -632,7 +626,7 @@ class WritingToolApp(QtWidgets.QApplication):
                     )
                     logging.debug('Invoked set_text on response window')
             else:
-                logging.debug('Getting response for direct replacement')
+                logging.debug('Getting response for clipboard output')
                 self.current_provider.get_response(system_instruction, prompt)
                 logging.debug('Response processed')
 
@@ -653,67 +647,60 @@ class WritingToolApp(QtWidgets.QApplication):
 
     def show_response_window(self, option, text):
         """
-        Show the response in a new window instead of pasting it.
+        Show the response in a new window.
         """
         response_window = ui.ResponseWindow.ResponseWindow(self, f"{option} Result")
         response_window.selected_text = text  # Store the text for regeneration
         response_window.show()
         return response_window
 
-    def replace_text(self, new_text):
-        """
-        Replaces the text by pasting in the LLM generated text. With "Key Points" and "Summary", invokes a window with the output instead.
-        """
-        error_message = 'ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST'
+    @Slot(str)
+    def handle_output_ready(self, new_text):
+        """Copy a complete response and signal when it is ready to paste."""
+        if not isinstance(new_text, str) or not new_text.strip():
+            logging.warning(f'Discarding empty response from provider (type={type(new_text).__name__})')
+            self.show_message_signal.emit(
+                'Empty Response',
+                'The AI returned an empty response, so nothing was copied. Please try again.'
+            )
+            return
+        if new_text.strip() == 'ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST':
+            self.show_message_signal.emit('Error', 'The text is incompatible with the requested change.')
+            return
 
-        # Confirm new_text exists and is a string
-        if new_text and isinstance(new_text, str):
-            self.output_queue += new_text
-            current_output = self.output_queue.strip()  # Strip whitespace for comparison
+        # Mirrors the providers' own `hasattr` guard. They decide whether to
+        # emit on a worker thread; by the time this queued slot runs on the GUI
+        # thread a window-mode run may have opened a window, and that window
+        # owns its own display path (`set_text`). Drop the stale result rather
+        # than clobber the clipboard behind the user's back.
+        if hasattr(self, 'current_response_window'):
+            logging.debug('Dropping clipboard response: a response window is active')
+            return
 
-            # If the new text is the error message, show a message box
-            if current_output == error_message:
-                self.show_message_signal.emit('Error', 'The text is incompatible with the requested change.')
-                return
+        if not self.input_backend.write_clipboard(new_text.rstrip('\n')):
+            self.show_message_signal.emit(
+                'Clipboard Error',
+                'Could not copy the response. Check that wl-clipboard is installed and the Wayland clipboard is available.'
+            )
+            return
+        self.show_clipboard_ready()
 
-            # Check if we're building up to the error message (to prevent partial pasting)
-            if len(current_output) <= len(error_message):
-                clean_current = ''.join(current_output.split())
-                clean_error = ''.join(error_message.split())
-                if clean_current == clean_error[:len(clean_current)]:
-                    return
+    def show_clipboard_ready(self):
+        """Restart the brief ready indicator after each successful copy."""
+        if self.tray_icon is None:
+            return
+        self.tray_icon.setIcon(self.ready_tray_icon)
+        self.tray_icon.setToolTip(self._('WritingTools — Ready to paste'))
+        self.tray_ready_timer.start(5000)
 
-            logging.debug('Processing output text')
-            try:
-                # For Summary and Key Points, show in response window
-                if hasattr(self, 'current_response_window'):
-                    self.current_response_window.append_text(new_text)
-                    
-                    # If this is the initial response, add it to chat history
-                    if len(self.current_response_window.chat_history) == 1:  # Only original text exists
-                        self.current_response_window.chat_history.append({
-                            "role": "assistant",
-                            "content": self.output_queue.rstrip('\n')
-                        })
-                else:
-                    # For other options, use the original clipboard-based replacement
-                    clipboard_backup = self.input_backend.read_clipboard()
-                    cleaned_text = self.output_queue.rstrip('\n')
-                    self.input_backend.write_clipboard(cleaned_text)
-                    
-                    pasted = self.input_backend.paste()
-                    time.sleep(0.2)
-                    # Restore the old clipboard only after a successful paste.
-                    if pasted:
-                        self.input_backend.write_clipboard(clipboard_backup)
-
-                if not hasattr(self, 'current_response_window'):
-                    self.output_queue = ""
-
-            except Exception as e:
-                logging.error(f'Error processing output: {e}')
-        else:
-            logging.debug('No new text to process')
+    def restore_tray_icon(self):
+        if self.tray_icon is None:
+            return
+        # Restores whatever the tray started with. `create_tray_icon` has
+        # already substituted a themed icon if the bundled PNG was missing, so
+        # a still-null icon here just means "back to the startup appearance".
+        self.tray_icon.setIcon(self.normal_tray_icon)
+        self.tray_icon.setToolTip("WritingTools")
 
     def create_tray_icon(self):
         """
@@ -731,6 +718,13 @@ class WritingToolApp(QtWidgets.QApplication):
             self.tray_icon = QtWidgets.QSystemTrayIcon(self)
         else:
             self.tray_icon = QtWidgets.QSystemTrayIcon(QtGui.QIcon(icon_path), self)
+        self.normal_tray_icon = self.tray_icon.icon()
+        if self.normal_tray_icon.isNull():
+            self.normal_tray_icon = QtGui.QIcon.fromTheme('accessories-text-editor')
+        self.ready_tray_icon = QtGui.QIcon(os.path.join(asset_root(), 'icons', 'clipboard_ready.svg'))
+        self.tray_ready_timer = QtCore.QTimer(self)
+        self.tray_ready_timer.setSingleShot(True)
+        self.tray_ready_timer.timeout.connect(self.restore_tray_icon)
         # Set the tooltip (hover name) for the tray icon
         self.tray_icon.setToolTip("WritingTools")
         self.tray_menu = QtWidgets.QMenu()

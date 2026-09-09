@@ -26,7 +26,7 @@ Response Flow:
    • The main app calls get_response() with a system instruction and a prompt.
    • The provider formats and sends the request to its API endpoint.
    • For operations that require a window (e.g. Summary, Key Points), the provider returns the full text.
-   • For direct text replacement, the provider emits the full text via the output_ready_signal.
+   • For clipboard output, the provider emits the full text via the output_ready_signal.
    • Conversation history (for follow-up questions) is maintained by the main app.
 
 Note: Streaming has been fully removed throughout the code.
@@ -502,7 +502,7 @@ class GeminiProvider(AIProvider):
         cases we make a single-shot non-streaming request.
 
         Returns the response text when `return_response` is True; otherwise emits
-        it via `output_ready_signal` for inline replacement.
+        it via `output_ready_signal` for clipboard output.
         """
         self.close_requested = False
 
@@ -517,14 +517,18 @@ class GeminiProvider(AIProvider):
 
             response_text = (response.text or "").rstrip('\n')
 
+            # A cancel can lose the race with a request that was already
+            # finishing. Dropping the text here keeps a cancelled generation
+            # from overwriting the user's clipboard anyway.
             if not return_response and not hasattr(self.app, 'current_response_window'):
+                if self.close_requested:
+                    return ""
                 self.app.output_ready_signal.emit(response_text)
-                self.app.replace_text(True)
                 return ""
             return response_text
         except Exception as e:
             logging.error(f"Error processing Gemini response: {e}")
-            self.app.output_ready_signal.emit("An error occurred while processing the response.")
+            self.app.show_message_signal.emit("Gemini Error", "An error occurred while processing the response.")
             return ""
         finally:
             self.close_requested = False
@@ -661,7 +665,12 @@ class OpenAICompatibleProvider(AIProvider):
             )
             response_text = response.choices[0].message.content.strip()
 
+            # A cancel can lose the race with a request that was already
+            # finishing. Dropping the text here keeps a cancelled generation
+            # from overwriting the user's clipboard anyway.
             if not return_response and not hasattr(self.app, 'current_response_window'):
+                if self.close_requested:
+                    return ""
                 self.app.output_ready_signal.emit(response_text)
             return response_text
 
@@ -1149,7 +1158,7 @@ class OpenAISubscriptionProvider(AIProvider):
             )
             # The interrupt can lose the race with a turn that was already
             # finishing. Dropping the text here keeps a cancelled generation
-            # from being pasted into the user's document anyway.
+            # from overwriting the user's clipboard anyway.
             if self.close_requested:
                 return ""
             if not return_response and not hasattr(self.app, "current_response_window"):
@@ -1391,12 +1400,17 @@ class OllamaProvider(AIProvider):
         try:
             response = self.client.chat(model=self.api_model, messages=messages)
             response_text = response['message']['content'].strip()
+            # A cancel can lose the race with a request that was already
+            # finishing. Dropping the text here keeps a cancelled generation
+            # from overwriting the user's clipboard anyway.
             if not return_response and not hasattr(self.app, 'current_response_window'):
+                if self.close_requested:
+                    return ""
                 self.app.output_ready_signal.emit(response_text)
             return response_text
         except Exception as e:
             logging.error(f"Error during Ollama chat: {e}")
-            self.app.output_ready_signal.emit("An error occurred during Ollama chat.")
+            self.app.show_message_signal.emit("Ollama Error", "An error occurred during Ollama chat.")
             return ""
 
     def after_load(self):

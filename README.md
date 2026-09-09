@@ -5,10 +5,6 @@ Python and PySide6. Copy text, then use a shortcut to proofread, rewrite,
 change tone, summarize, or apply custom instructions. It supports Gemini,
 ChatGPT subscriptions, Ollama, and OpenAI-compatible servers.
 
-Run it from a checkout with `python main.py`. There is no X11, Windows, or
-packaged-build support. The code is in `src/`, assets are in `assets/`, and
-tests are in `tests/`.
-
 ## Run
 
 Install `wl-clipboard`, `xdg-desktop-portal`, and your compositor's portal
@@ -47,8 +43,12 @@ paths, or delete it and relaunch to have a fresh one written.
 
 Shortcut registration uses the desktop portal and requires a backend that
 supports GlobalShortcuts. Copy text before invoking Writing Tools: the app
-cannot read another application's selection on Wayland. If automatic pasting
-is unavailable, the result stays on the clipboard for you to paste manually.
+cannot read another application's selection on Wayland. Responses for options
+set to **Copy to clipboard** stay on the clipboard for you to paste manually;
+the app never pastes or replaces text automatically. After a successful copy,
+the tray icon changes to a green clipboard with a checkmark for five seconds,
+then returns to normal. Another result restarts the five-second indicator.
+Options configured to open in a pop-up window continue to show their response there.
 
 On desktops that handle shortcut assignment through the portal, configure the
 shortcut when prompted. Hyprland requires a binding in its own configuration.

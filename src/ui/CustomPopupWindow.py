@@ -158,15 +158,15 @@ class ButtonEditDialog(QDialog):
         layout.addWidget(display_label)
         
         radio_layout = QHBoxLayout()
-        self.replace_radio = QRadioButton("Replace the selected text")
+        self.clipboard_radio = QRadioButton("Copy to clipboard")
         self.window_radio = QRadioButton("In a pop-up window (with follow-up support)")
-        for r in (self.replace_radio, self.window_radio):
+        for r in (self.clipboard_radio, self.window_radio):
             r.setStyleSheet(f"color: {'#fff' if colorMode == 'dark' else '#333'};")
         
-        self.replace_radio.setChecked(not self.button_data.get("open_in_window", False))
+        self.clipboard_radio.setChecked(not self.button_data.get("open_in_window", False))
         self.window_radio.setChecked(self.button_data.get("open_in_window", False))
 
-        radio_layout.addWidget(self.replace_radio)
+        radio_layout.addWidget(self.clipboard_radio)
         radio_layout.addWidget(self.window_radio)
         layout.addLayout(radio_layout)
 

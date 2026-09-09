@@ -76,7 +76,7 @@ def ensure_desktop_entry():
 
 
 class WaylandInputBackend:
-    """Wayland clipboard backend with optional Hyprland paste injection."""
+    """Wayland clipboard and global shortcut backend."""
 
     def __init__(self, app):
         self.app = app
@@ -92,11 +92,9 @@ class WaylandInputBackend:
         self._shortcut_callbacks = {}
         self._has_wl_clipboard = bool(shutil.which("wl-paste") and shutil.which("wl-copy"))
         self._is_hyprland = os.environ.get("XDG_CURRENT_DESKTOP", "").lower().find("hyprland") >= 0
-        self._has_hyprctl = bool(shutil.which("hyprctl")) and self._is_hyprland
         self.capabilities = {
             "global_shortcuts": False,
             "automatic_selection_capture": False,
-            "automatic_paste": self._has_hyprctl,
             "clipboard": self._has_wl_clipboard,
         }
 
@@ -367,18 +365,8 @@ class WaylandInputBackend:
         if not self._has_wl_clipboard:
             return False
         try:
-            result = subprocess.run(["wl-copy"], input=text, text=True, timeout=2)
-            return result.returncode == 0
-        except (OSError, subprocess.SubprocessError):
-            return False
-
-    def paste(self):
-        if not self._has_hyprctl:
-            return False
-        try:
             result = subprocess.run(
-                ["hyprctl", "dispatch", "sendshortcut", "CTRL,V", "activewindow"],
-                capture_output=True, text=True, timeout=2,
+                ["wl-copy"], input=text, text=True, capture_output=True, timeout=2
             )
             return result.returncode == 0
         except (OSError, subprocess.SubprocessError):
@@ -396,6 +384,4 @@ class WaylandInputBackend:
             hint = self.compositor_bind_hint()
             if hint:
                 problems.append(hint)
-        if not self._has_hyprctl:
-            problems.append("Automatic paste is unavailable outside Hyprland; paste the result manually.")
         return " ".join(problems)
