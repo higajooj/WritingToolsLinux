@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import sys
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -10,6 +11,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtCore, QtWidgets
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtTest import QTest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -74,7 +76,10 @@ class PopupOptionSelectionTests(unittest.TestCase):
         self.assertTrue(self.window.isVisible())
         self.assertEqual(self.window.selected_option, "Proofread")
         self.assertTrue(self.button("Proofread").property("selected"))
-        self.assertIn("Proofread", self.window.custom_input.placeholderText())
+        self.assertEqual(
+            self.window.custom_input.placeholderText(),
+            "Add instructions (optional)...",
+        )
 
     def test_enter_runs_selected_option_with_optional_instructions(self):
         self.button("Proofread").click()
@@ -119,6 +124,38 @@ class PopupOptionSelectionTests(unittest.TestCase):
         self.app.process_option.assert_not_called()
         self.assertTrue(self.window.isVisible())
 
+    def test_clicking_selected_option_again_returns_to_custom(self):
+        self.button("Proofread").click()
+        self.button("Proofread").click()
+
+        self.assertIsNone(self.window.selected_option)
+        self.assertFalse(self.button("Proofread").property("selected"))
+        self.assertEqual(
+            self.window.custom_input.placeholderText(),
+            "Describe your change...",
+        )
+
+        self.window.custom_input.setText("Turn this into verse")
+        self.window.send_button.click()
+
+        self.app.process_option.assert_called_once_with(
+            "Custom",
+            "Turn this into verse",
+        )
+
+    def test_empty_option_name_is_still_a_selection(self):
+        self.window.on_generic_instruction("")
+        self.window.send_button.click()
+
+        self.app.process_option.assert_called_once_with("", None)
+
+    def test_entering_edit_mode_clears_selection(self):
+        self.button("Proofread").click()
+        self.window.toggle_edit_mode()
+
+        self.assertIsNone(self.window.selected_option)
+        self.assertFalse(self.button("Proofread").property("selected"))
+
 
 class OptionPromptTests(unittest.TestCase):
     def setUp(self):
@@ -152,8 +189,111 @@ class OptionPromptTests(unittest.TestCase):
             "\n\nText: Original text",
         )
 
+    def build_system_instruction(self, option, additional_instructions=None):
+        return WritingToolApp._build_system_instruction(
+            self.app,
+            option,
+            additional_instructions,
+        )
+
+    def test_system_instruction_unchanged_without_additions(self):
+        self.assertEqual(
+            self.build_system_instruction("Proofread", "   "),
+            "Correct the text.",
+        )
+
+    def test_system_instruction_gives_additions_precedence(self):
+        instruction = self.build_system_instruction("Proofread", " Translate to French ")
+
+        self.assertTrue(instruction.startswith("Correct the text.\n\n"))
+        self.assertIn("override the rules above", instruction)
+        self.assertTrue(instruction.endswith("\nTranslate to French"))
+
+    def test_custom_system_instruction_is_unchanged(self):
+        self.assertEqual(
+            self.build_system_instruction("Custom", "Make it rhyme"),
+            "Apply the described change.",
+        )
+
+
+class _ResponseWindowStub(QtCore.QObject):
+    def __init__(self):
+        super().__init__()
+        self.chat_history = []
+        self.text = None
+
+    @Slot(str)
+    def set_text(self, text):
+        self.text = text
+
+
+class _OptionWorkerHost(QtCore.QObject):
+    """The slice of WritingToolApp that `process_option_thread` touches."""
+
+    show_message_signal = Signal(str, str)
+
+    _setup_response_window = WritingToolApp._setup_response_window
+    _build_option_prompt = WritingToolApp._build_option_prompt
+    _build_system_instruction = WritingToolApp._build_system_instruction
+    process_option_thread = WritingToolApp.process_option_thread
+
+
+class ProcessOptionThreadTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def test_window_option_seeds_history_with_the_prompt_sent_to_provider(self):
+        host = _OptionWorkerHost()
+        host.options = OPTIONS
+        host.input_backend = Mock()
+        host.current_text_holder = SimpleNamespace(ready=threading.Event(), text="Long text")
+        host.current_text_holder.ready.set()
+        window = _ResponseWindowStub()
+        host.show_response_window = Mock(return_value=window)
+        host.current_provider = Mock()
+        host.current_provider.get_response.return_value = "Short summary"
+
+        worker = threading.Thread(
+            target=host.process_option_thread,
+            args=("Summary", "Use bullets"),
+        )
+        worker.start()
+        while worker.is_alive():
+            QtWidgets.QApplication.processEvents()
+        worker.join()
+        QtWidgets.QApplication.processEvents()
+
+        prompt = "Summarize this:\n\nAdditional instructions: Use bullets\n\nText:\nLong text"
+        host.show_response_window.assert_called_once_with("Summary", "Long text")
+        self.assertEqual(window.chat_history, [{"role": "user", "content": prompt}])
+        system_instruction, sent_prompt = host.current_provider.get_response.call_args.args
+        self.assertEqual(sent_prompt, prompt)
+        self.assertIn("Use bullets", system_instruction)
+        self.assertEqual(window.text, "Short summary")
+
 
 class ResponseHistoryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def test_followups_wait_for_initial_response(self):
+        class App(QtCore.QObject):
+            followup_response_signal = Signal(str)
+
+        app = App()
+        app.config = {}
+        window = ResponseWindow(app, "Summary Result")
+        self.addCleanup(window.deleteLater)
+
+        self.assertFalse(window.input_field.isEnabled())
+
+        with patch("ui.ResponseWindow.QtCore.QTimer.singleShot"):
+            window.set_text("Short summary")
+
+        self.assertTrue(window.input_field.isEnabled())
+
     def test_initial_response_keeps_preseeded_request(self):
         request = "Summarize this:\n\nAdditional instructions: Use bullets\n\nText:\nLong text"
         response = SimpleNamespace(

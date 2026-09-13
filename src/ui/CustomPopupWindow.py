@@ -233,7 +233,7 @@ class DraggableButton(QtWidgets.QPushButton):
             }}
             QPushButton[selected="true"] {{
                 background-color: {"#315b36" if colorMode=="dark" else "#e5f4e7"};
-                border: 2px solid {"#66bb6a" if colorMode=="dark" else "#4CAF50"};
+                border-color: {"#66bb6a" if colorMode=="dark" else "#4CAF50"};
             }}
         """
         self.setStyleSheet(self.base_style)
@@ -653,9 +653,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         if self.edit_mode:
             # Switch to edit mode:
-            self.selected_option = None
-            for button in self.button_widgets:
-                button.setProperty("selected", False)
+            self.set_selected_option(None)
             icon_name = "check"
             # No text, just the check icon, a bit bigger:
             self.edit_button.setText("")
@@ -944,26 +942,36 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
     def on_custom_change(self):
         txt = self.custom_input.text().strip()
-        if self.selected_option:
+        # `is not None`: an empty button name is still a valid selection.
+        if self.selected_option is not None:
             self.app.process_option(self.selected_option, txt or None)
             self.close()
         elif txt:
             self.app.process_option('Custom', txt)
             self.close()
 
+    def set_selected_option(self, option):
+        """Highlight `option` (or clear with None) and retitle the input."""
+        self.selected_option = option
+        for button in self.button_widgets:
+            button.setProperty("selected", option is not None and button.key == option)
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+        # The highlighted button already names the action, so the placeholder
+        # stays short enough not to clip "(optional)" in the narrow field.
+        if option is None:
+            self.custom_input.setPlaceholderText(_("Describe your change..."))
+        else:
+            self.custom_input.setPlaceholderText(_("Add instructions (optional)..."))
+
     def on_generic_instruction(self, instruction):
         if not self.edit_mode:
-            self.selected_option = instruction
-            for button in self.button_widgets:
-                button.setProperty("selected", button.key == instruction)
-                button.style().unpolish(button)
-                button.style().polish(button)
-
-            self.custom_input.setPlaceholderText(
-                _("Add instructions for “{option}” (optional)...").format(
-                    option=instruction
-                )
-            )
+            # Clicking the selected button again returns to a custom change.
+            if self.selected_option == instruction:
+                self.set_selected_option(None)
+            else:
+                self.set_selected_option(instruction)
             self.custom_input.setFocus()
 
     # No hide-on-deactivate: under a focus-follows-mouse compositor merely

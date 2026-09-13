@@ -444,6 +444,10 @@ class ResponseWindow(QtWidgets.QWidget):
             }}
         """)
         self.input_field.returnPressed.connect(self.send_message)
+        # Follow-ups wait for the initial response: `set_text` appends it to
+        # the seeded history, so an earlier question would land out of order.
+        # `stop_thinking_animation` re-enables the field.
+        self.input_field.setEnabled(False)
         bottom_bar.addWidget(self.input_field)
         
         send_button = QtWidgets.QPushButton()

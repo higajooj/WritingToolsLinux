@@ -576,6 +576,26 @@ class WritingToolApp(QtWidgets.QApplication):
             )
         return f"{prompt_prefix}{selected_text}"
 
+    def _build_system_instruction(self, option, additional_instructions=None):
+        """
+        Build the system instruction for one invocation. Built-in options
+        carry standing rules ("Output ONLY...", "Respond in the same
+        language...") that would otherwise outrank per-run instructions
+        sent only in the user turn, so repeat them here with explicit
+        precedence. Custom already treats the user's text as the change.
+        """
+        system_instruction = self.options[option]['instruction']
+        additional_instructions = (additional_instructions or '').strip()
+
+        if option == 'Custom' or not additional_instructions:
+            return system_instruction
+        return (
+            f"{system_instruction}\n\n"
+            "For this request the user also gave these instructions. Follow "
+            "them, even where they override the rules above:\n"
+            f"{additional_instructions}"
+        )
+
     def process_option_thread(self, option, additional_instructions=None):
         """
         Worker: wait for the background clipboard capture to land, then
@@ -607,7 +627,10 @@ class WritingToolApp(QtWidgets.QApplication):
 
         try:
             selected_prompt = self.options[option]
-            system_instruction = selected_prompt['instruction']
+            system_instruction = self._build_system_instruction(
+                option,
+                additional_instructions,
+            )
             prompt = self._build_option_prompt(
                 option,
                 selected_text,
