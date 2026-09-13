@@ -621,11 +621,15 @@ class ResponseWindow(QtWidgets.QWidget):
         if not text.strip():
             return
                 
-        # Always ensure chat history is initialized properly
-        self.chat_history = [
-            {"role": "user", "content": f"{self.option}: {self.selected_text}"},
-            {"role": "assistant", "content": text}  # Add initial response immediately
-        ]
+        # `_setup_response_window` seeds the exact initial request so follow-up
+        # questions retain any per-run instructions. Keep the old fallback for
+        # callers that construct a response window directly.
+        if not self.chat_history:
+            self.chat_history.append({
+                "role": "user",
+                "content": f"{self.option}: {self.selected_text}",
+            })
+        self.chat_history.append({"role": "assistant", "content": text})
         
         self.stop_thinking_animation()
         text_display = self.chat_area.add_message(text)

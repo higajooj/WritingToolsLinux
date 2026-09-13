@@ -212,6 +212,7 @@ class DraggableButton(QtWidgets.QPushButton):
 
         # Use a dynamic property "hover" (default False)
         self.setProperty("hover", False)
+        self.setProperty("selected", False)
 
         # Set fixed size (adjust as needed)
         self.setFixedSize(120, 40)
@@ -229,6 +230,10 @@ class DraggableButton(QtWidgets.QPushButton):
             }}
             QPushButton[hover="true"] {{
                 background-color: {"#555" if colorMode=="dark" else "#f0f0f0"};
+            }}
+            QPushButton[selected="true"] {{
+                background-color: {"#315b36" if colorMode=="dark" else "#e5f4e7"};
+                border: 2px solid {"#66bb6a" if colorMode=="dark" else "#4CAF50"};
             }}
         """
         self.setStyleSheet(self.base_style)
@@ -323,12 +328,14 @@ class CustomPopupWindow(QtWidgets.QWidget):
         super().__init__()
         self.app = app
         self.edit_mode = False
+        self.selected_option = None
 
         self.drag_label = None
         self.edit_button = None
         self.reset_button = None
         self.close_button = None
         self.custom_input = None
+        self.send_button = None
         self.input_area = None
         
         self.button_widgets = []
@@ -463,13 +470,13 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.custom_input.returnPressed.connect(self.on_custom_change)
         input_layout.addWidget(self.custom_input)
         
-        send_btn = QPushButton()
+        self.send_button = QPushButton()
         send_icon = os.path.join(asset_root(),
                                 'icons',
                                 'send' + ('_dark' if colorMode=='dark' else '_light') + '.png')
         if os.path.exists(send_icon):
-            send_btn.setIcon(QtGui.QIcon(send_icon))
-        send_btn.setStyleSheet(f"""
+            self.send_button.setIcon(QtGui.QIcon(send_icon))
+        self.send_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {'#2e7d32' if colorMode=='dark' else '#4CAF50'};
                 border: none;
@@ -480,10 +487,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 background-color: {'#1b5e20' if colorMode=='dark' else '#45a049'};
             }}
         """)
-        send_btn.setFixedSize(self.custom_input.sizeHint().height(),
-                            self.custom_input.sizeHint().height())
-        send_btn.clicked.connect(self.on_custom_change)
-        input_layout.addWidget(send_btn)
+        self.send_button.setFixedSize(self.custom_input.sizeHint().height(),
+                                      self.custom_input.sizeHint().height())
+        self.send_button.clicked.connect(self.on_custom_change)
+        input_layout.addWidget(self.send_button)
         
         content_layout.addWidget(self.input_area)
 
@@ -646,6 +653,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         if self.edit_mode:
             # Switch to edit mode:
+            self.selected_option = None
+            for button in self.button_widgets:
+                button.setProperty("selected", False)
             icon_name = "check"
             # No text, just the check icon, a bit bigger:
             self.edit_button.setText("")
@@ -934,18 +944,31 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
     def on_custom_change(self):
         txt = self.custom_input.text().strip()
-        if txt:
+        if self.selected_option:
+            self.app.process_option(self.selected_option, txt or None)
+            self.close()
+        elif txt:
             self.app.process_option('Custom', txt)
             self.close()
 
     def on_generic_instruction(self, instruction):
         if not self.edit_mode:
-            self.app.process_option(instruction)
-            self.close()
+            self.selected_option = instruction
+            for button in self.button_widgets:
+                button.setProperty("selected", button.key == instruction)
+                button.style().unpolish(button)
+                button.style().polish(button)
+
+            self.custom_input.setPlaceholderText(
+                _("Add instructions for “{option}” (optional)...").format(
+                    option=instruction
+                )
+            )
+            self.custom_input.setFocus()
 
     # No hide-on-deactivate: under a focus-follows-mouse compositor merely
     # moving the pointer away would dismiss the popup. It closes on Escape,
-    # the close button, picking an action, or pressing the hotkey again.
+    # the close button, submitting an action, or pressing the hotkey again.
 
     def keyPressEvent(self, event):
         if event.key()==QtCore.Qt.Key_Escape:

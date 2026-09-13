@@ -521,12 +521,13 @@ class WritingToolApp(QtWidgets.QApplication):
 
         threading.Thread(target=read, daemon=True).start()
 
-    def process_option(self, option, custom_change=None):
+    def process_option(self, option, additional_instructions=None):
         """
         Spawn a worker thread that waits for the asynchronous clipboard
-        capture and then runs the chosen option. Kept as a thin wrapper so
-        the popup's click handler returns immediately and the GUI thread
-        is never blocked on the clipboard read.
+        capture and then runs the chosen option, optionally augmented with
+        instructions for this invocation. Kept as a thin wrapper so the
+        popup's submit handler returns immediately and the GUI thread is
+        never blocked on the clipboard read.
         """
         logging.debug(f'Processing option: {option}')
 
@@ -538,12 +539,12 @@ class WritingToolApp(QtWidgets.QApplication):
 
         threading.Thread(
             target=self.process_option_thread,
-            args=(option, custom_change),
+            args=(option, additional_instructions),
             daemon=True
         ).start()
 
-    @Slot(str, str)
-    def _setup_response_window(self, option, selected_text):
+    @Slot(str, str, str)
+    def _setup_response_window(self, option, selected_text, initial_prompt):
         """
         Open the response window and seed its chat history. Called from
         `process_option_thread` via `BlockingQueuedConnection` so the
@@ -554,11 +555,28 @@ class WritingToolApp(QtWidgets.QApplication):
         self.current_response_window.chat_history = [
             {
                 "role": "user",
-                "content": f"Original text to {option.lower()}:\n\n{selected_text}"
+                "content": initial_prompt
             }
         ]
 
-    def process_option_thread(self, option, custom_change=None):
+    def _build_option_prompt(self, option, selected_text, additional_instructions=None):
+        """Build the user prompt for a configured option and one invocation."""
+        prompt_prefix = self.options[option]['prefix']
+        additional_instructions = (additional_instructions or '').strip()
+
+        if option == 'Custom':
+            return (
+                f"{prompt_prefix}Described change: {additional_instructions}"
+                f"\n\nText: {selected_text}"
+            )
+        if additional_instructions:
+            return (
+                f"{prompt_prefix}Additional instructions: {additional_instructions}"
+                f"\n\nText:\n{selected_text}"
+            )
+        return f"{prompt_prefix}{selected_text}"
+
+    def process_option_thread(self, option, additional_instructions=None):
         """
         Worker: wait for the background clipboard capture to land, then
         either open a response window (for window-mode options) or set up
@@ -587,27 +605,28 @@ class WritingToolApp(QtWidgets.QApplication):
             self.show_message_signal.emit('Error', message)
             return
 
-        if self.options[option]['open_in_window']:
-            QtCore.QMetaObject.invokeMethod(
-                self,
-                '_setup_response_window',
-                QtCore.Qt.ConnectionType.BlockingQueuedConnection,
-                QtCore.Q_ARG(str, option),
-                QtCore.Q_ARG(str, selected_text)
+        try:
+            selected_prompt = self.options[option]
+            system_instruction = selected_prompt['instruction']
+            prompt = self._build_option_prompt(
+                option,
+                selected_text,
+                additional_instructions,
             )
 
-        try:
-            selected_prompt = self.options.get(option, ('', ''))
-            prompt_prefix = selected_prompt['prefix']
-            system_instruction = selected_prompt['instruction']
-            if option == 'Custom':
-                prompt = f"{prompt_prefix}Described change: {custom_change}\n\nText: {selected_text}"
-            else:
-                prompt = f"{prompt_prefix}{selected_text}"
+            if selected_prompt['open_in_window']:
+                QtCore.QMetaObject.invokeMethod(
+                    self,
+                    '_setup_response_window',
+                    QtCore.Qt.ConnectionType.BlockingQueuedConnection,
+                    QtCore.Q_ARG(str, option),
+                    QtCore.Q_ARG(str, selected_text),
+                    QtCore.Q_ARG(str, prompt)
+                )
 
             logging.debug(f'Getting response from provider for option: {option}')
 
-            if self.options[option]['open_in_window']:
+            if selected_prompt['open_in_window']:
                 logging.debug('Getting response for window display')
                 response = self.current_provider.get_response(system_instruction, prompt, return_response=True)
                 logging.debug(f'Got response of length: {len(response) if response else 0}')
