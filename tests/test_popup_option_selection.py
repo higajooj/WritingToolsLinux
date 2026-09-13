@@ -302,10 +302,10 @@ class ResponseHistoryTests(unittest.TestCase):
             selected_text="Long text",
             stop_thinking_animation=Mock(),
             chat_area=Mock(),
+            _add_message=Mock(),
             app=SimpleNamespace(config={}),
             _adjust_window_height=Mock(),
         )
-        response.chat_area.add_message.return_value = Mock()
 
         with patch("ui.ResponseWindow.QtCore.QTimer.singleShot"):
             ResponseWindow.set_text(response, "Short summary")

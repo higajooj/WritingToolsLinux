@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 
 import markdown2
@@ -11,14 +12,22 @@ from ui.UIUtils import UIUtils, colorMode
 
 _ = lambda x: x
 
+DEFAULT_ZOOM_FACTOR = 1.2
+MIN_ZOOM_FACTOR = 0.5
+MAX_ZOOM_FACTOR = 3.0
+ZOOM_STEP = 1.1
+# One Ctrl+wheel gesture emits many zoom steps; write config once it settles.
+ZOOM_SAVE_DELAY_MS = 500
+
+
 class MarkdownTextBrowser(QtWidgets.QTextBrowser):
     """Enhanced text browser for displaying Markdown content with improved sizing"""
     
-    def __init__(self, parent=None, is_user_message=False):
+    def __init__(self, parent=None, is_user_message=False, zoom_factor=DEFAULT_ZOOM_FACTOR):
         super().__init__(parent)
         self.setReadOnly(True)
         self.setOpenExternalLinks(True)
-        self.zoom_factor = 1.2
+        self.zoom_factor = zoom_factor
         self.base_font_size = 14
         self.is_user_message = is_user_message
         
@@ -110,7 +119,7 @@ class MarkdownTextBrowser(QtWidgets.QTextBrowser):
             if parent:
                 if delta > 0:
                     parent.zoom_all_messages('in')
-                else:
+                elif delta < 0:
                     parent.zoom_all_messages('out')
                 event.accept()
         else:
@@ -118,24 +127,9 @@ class MarkdownTextBrowser(QtWidgets.QTextBrowser):
             if self.parent():
                 self.parent().wheelEvent(event)
             
-    def zoom_in(self):
-        old_factor = self.zoom_factor
-        self.zoom_factor = min(3.0, self.zoom_factor * 1.1)
-        if old_factor != self.zoom_factor:
-            self._apply_zoom()
-            self._update_size()
-        
-    def zoom_out(self):
-        old_factor = self.zoom_factor
-        self.zoom_factor = max(0.5, self.zoom_factor / 1.1)
-        if old_factor != self.zoom_factor:
-            self._apply_zoom()
-            self._update_size()
-        
-    def reset_zoom(self):
-        old_factor = self.zoom_factor
-        self.zoom_factor = 1.2  # Reset to default zoom
-        if old_factor != self.zoom_factor:
+    def set_zoom_factor(self, zoom_factor):
+        if self.zoom_factor != zoom_factor:
+            self.zoom_factor = zoom_factor
             self._apply_zoom()
             self._update_size()
     
@@ -206,7 +200,7 @@ class ChatContentScrollArea(QScrollArea):
             }
         """)
 
-    def add_message(self, text, is_user=False):
+    def add_message(self, text, is_user=False, zoom_factor=DEFAULT_ZOOM_FACTOR):
         # Remove bottom stretch
         self.layout.takeAt(self.layout.count() - 1)
         
@@ -223,7 +217,10 @@ class ChatContentScrollArea(QScrollArea):
         msg_layout.setSpacing(0)
         
         # Create text display with updated width
-        text_display = MarkdownTextBrowser(is_user_message=is_user)
+        text_display = MarkdownTextBrowser(
+            is_user_message=is_user,
+            zoom_factor=zoom_factor,
+        )
         
         # Enable tables extension in markdown2
         html = markdown2.markdown(text, extras=['tables', 'strike'])
@@ -239,9 +236,6 @@ class ChatContentScrollArea(QScrollArea):
         self.layout.addWidget(msg_container)
         self.layout.addStretch()
         
-        if hasattr(self.parent(), 'current_text_display'):
-            self.parent().current_text_display = text_display
-            
         QtCore.QTimer.singleShot(50, self.post_message_updates)
         
         return text_display
@@ -312,6 +306,11 @@ class ResponseWindow(QtWidgets.QWidget):
         self.loading_container = None
         self.chat_area = None
         self.chat_history = []
+        self.zoom_factor = self._load_zoom_factor()
+        self.zoom_save_timer = QtCore.QTimer(self)
+        self.zoom_save_timer.setSingleShot(True)
+        self.zoom_save_timer.setInterval(ZOOM_SAVE_DELAY_MS)
+        self.zoom_save_timer.timeout.connect(self._save_zoom_factor)
 
         # Setup thinking animation with full range of dots
         self.thinking_timer = QtCore.QTimer(self)
@@ -547,20 +546,58 @@ class ResponseWindow(QtWidgets.QWidget):
 
     def zoom_all_messages(self, action='in'):
         """Apply zoom action to all messages in the chat"""
+        if action == 'in':
+            new_zoom_factor = min(MAX_ZOOM_FACTOR, self.zoom_factor * ZOOM_STEP)
+        elif action == 'out':
+            new_zoom_factor = max(MIN_ZOOM_FACTOR, self.zoom_factor / ZOOM_STEP)
+        else:
+            new_zoom_factor = DEFAULT_ZOOM_FACTOR
+
+        if new_zoom_factor == self.zoom_factor:
+            return
+
+        self.zoom_factor = new_zoom_factor
         for i in range(self.chat_area.layout.count() - 1):  # Skip stretch item
             item = self.chat_area.layout.itemAt(i)
             if item and item.widget():
                 text_display = item.widget().layout().itemAt(0).widget()
                 if isinstance(text_display, MarkdownTextBrowser):
-                    if action == 'in':
-                        text_display.zoom_in()
-                    elif action == 'out':
-                        text_display.zoom_out()
-                    else:  # reset
-                        text_display.reset_zoom()
-        
+                    text_display.set_zoom_factor(self.zoom_factor)
+
         # Update layout after zooming
         self.chat_area.update_content_height()
+
+        # New windows read the in-memory config; the disk write is debounced.
+        self.app.config['response_window_zoom'] = self.zoom_factor
+        self.zoom_save_timer.start()
+
+    def _save_zoom_factor(self):
+        """Write the pending zoom setting to the config file."""
+        self.zoom_save_timer.stop()
+        try:
+            self.app.save_config(self.app.config)
+        except OSError as e:
+            logging.error(f"Error saving response window zoom: {e}")
+
+    def _load_zoom_factor(self):
+        """Load and constrain the shared response-window zoom setting."""
+        try:
+            configured_zoom = float(
+                (self.app.config or {}).get('response_window_zoom', DEFAULT_ZOOM_FACTOR)
+            )
+        except (TypeError, ValueError):
+            configured_zoom = DEFAULT_ZOOM_FACTOR
+        if not math.isfinite(configured_zoom):
+            configured_zoom = DEFAULT_ZOOM_FACTOR
+        return min(MAX_ZOOM_FACTOR, max(MIN_ZOOM_FACTOR, configured_zoom))
+
+    def _add_message(self, text, is_user=False):
+        """Add a message using this response window's active zoom."""
+        return self.chat_area.add_message(
+            text,
+            is_user=is_user,
+            zoom_factor=self.zoom_factor,
+        )
         
     def _adjust_window_height(self):
         """Calculate and set the ideal window height"""
@@ -636,12 +673,7 @@ class ResponseWindow(QtWidgets.QWidget):
         self.chat_history.append({"role": "assistant", "content": text})
         
         self.stop_thinking_animation()
-        text_display = self.chat_area.add_message(text)
-        
-        # Update zoom state
-        if hasattr(self.app.config, 'response_window_zoom'):
-            text_display.zoom_factor = self.app.config['response_window_zoom']
-            text_display._apply_zoom()
+        self._add_message(text)
         
         QtCore.QTimer.singleShot(100, self._adjust_window_height)
         
@@ -650,12 +682,7 @@ class ResponseWindow(QtWidgets.QWidget):
         """Handle the follow-up response from the AI with improved layout handling"""
         if response_text:
             self.loading_label.setVisible(False)
-            text_display = self.chat_area.add_message(response_text)
-            
-            # Maintain consistent zoom level
-            if hasattr(self, 'current_text_display'):
-                text_display.zoom_factor = self.current_text_display.zoom_factor
-                text_display._apply_zoom()
+            self._add_message(response_text)
             
             if len(self.chat_history) > 0 and self.chat_history[-1]["role"] != "assistant":
                 self.chat_history.append({
@@ -679,10 +706,7 @@ class ResponseWindow(QtWidgets.QWidget):
         self.input_field.clear()
         
         # Add user message and maintain zoom level
-        text_display = self.chat_area.add_message(message, is_user=True)
-        if hasattr(self, 'current_text_display'):
-            text_display.zoom_factor = self.current_text_display.zoom_factor
-            text_display._apply_zoom()
+        self._add_message(message, is_user=True)
         
         self.chat_history.append({"role": "user", "content": message})
         self.start_thinking_animation()
@@ -701,10 +725,8 @@ class ResponseWindow(QtWidgets.QWidget):
         
     def closeEvent(self, event):
         """Handle window close event"""
-        # Save zoom factor to main config
-        if hasattr(self, 'current_text_display'):
-            self.app.config['response_window_zoom'] = self.current_text_display.zoom_factor
-            self.app.save_config(self.app.config)
+        if self.zoom_save_timer.isActive():
+            self._save_zoom_factor()
 
         self.chat_history = []
         
