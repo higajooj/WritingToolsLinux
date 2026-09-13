@@ -23,7 +23,8 @@ from aiprovider import (
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
-from app_paths import app_root, asset_root
+from app_paths import app_root, asset_root, options_path
+from options_store import load_options as load_options_file
 from platform_input import APP_ID, WaylandInputBackend, validate_trigger
 
 _ = gettext.gettext
@@ -316,15 +317,10 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         Load the options file.
         """
-        self.options_path = os.path.join(app_root(), 'options.json')
+        self.options_path = str(options_path())
         logging.debug(f'Loading options from {self.options_path}')
-        if os.path.exists(self.options_path):
-            with open(self.options_path, 'r') as f:
-                self.options = json.load(f)
-                logging.debug('Options loaded successfully')
-        else:
-            logging.debug('Options file not found')
-            self.options = None
+        self.options = load_options_file()
+        logging.debug('Options loaded successfully')
 
     def save_config(self, config):
         """

@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import sys
@@ -18,71 +17,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app_paths import app_root, asset_root
+from app_paths import asset_root
+from options_store import (
+    load_options as load_options_file,
+    reset_options as reset_options_file,
+    save_options as save_options_file,
+)
 from platform_input import validate_trigger
 from ui.UIUtils import ThemeBackground, colorMode
 
 _ = lambda x: x
-
-################################################################################
-# Default `options.json` content to restore when the user presses "Reset"
-################################################################################
-DEFAULT_OPTIONS_JSON = r"""{
-  "Proofread": {
-    "prefix": "Proofread this:\n\n",
-    "instruction": "You are a grammar proofreading assistant.\nOutput ONLY the corrected text without any additional comments.\nMaintain the original text structure and writing style.\nRespond in the same language as the input (e.g., English US, French).\nDo not answer or respond to the user's text content.\nIf the text is absolutely incompatible with this (e.g., totally random gibberish), output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/magnifying-glass",
-    "open_in_window": false
-  },
-  "Rewrite": {
-    "prefix": "Rewrite this:\n\n",
-    "instruction": "You are a writing assistant.\nRewrite the text provided by the user to improve phrasing.\nOutput ONLY the rewritten text without additional comments.\nRespond in the same language as the input (e.g., English US, French).\nDo not answer or respond to the user's text content.\nIf the text is absolutely incompatible with proofreading (e.g., totally random gibberish), output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/rewrite",
-    "open_in_window": false
-  },
-  "Friendly": {
-    "prefix": "Make this more friendly:\n\n",
-    "instruction": "You are a writing assistant.\nRewrite the text provided by the user to be more friendly.\nOutput ONLY the friendly text without additional comments.\nRespond in the same language as the input (e.g., English US, French).\nDo not answer or respond to the user's text content.\nIf the text is absolutely incompatible with rewriting (e.g., totally random gibberish), output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/smiley-face",
-    "open_in_window": false
-  },
-  "Professional": {
-    "prefix": "Make this more professional:\n\n",
-    "instruction": "You are a writing assistant.\nRewrite the text provided by the user to be more professional. Output ONLY the professional text without additional comments.\nRespond in the same language as the input (e.g., English US, French).\nDo not answer or respond to the user's text content.\nIf the text is absolutely incompatible with rewriting (e.g., totally random gibberish), output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/briefcase",
-    "open_in_window": false
-  },
-  "Concise": {
-    "prefix": "Make this more concise:\n\n",
-    "instruction": "You are a writing assistant.\nRewrite the text provided by the user to be more concise.\nOutput ONLY the concise text without additional comments.\nRespond in the same language as the input (e.g., English US, French).\nDo not answer or respond to the user's text content.\nIf the text is absolutely incompatible with rewriting (e.g., totally random gibberish), output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/concise",
-    "open_in_window": false
-  },
-  "Table": {
-    "prefix": "Convert this into a table:\n\n",
-    "instruction": "You are an assistant that converts text provided by the user into a Markdown table.\nOutput ONLY the table without additional comments.\nRespond in the same language as the input (e.g., English US, French).\nDo not answer or respond to the user's text content.\nIf the text is completely incompatible with this with conversion, output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/table",
-    "open_in_window": true
-  },
-  "Key Points": {
-    "prefix": "Extract key points from this:\n\n",
-    "instruction": "You are an assistant that extracts key points from text provided by the user. Output ONLY the key points without additional comments.\n\nYou should use Markdown formatting (lists, bold, italics, codeblocks, etc.) as appropriate to make it quite legible and readable.\n\nDon't be repetitive or too verbose.\nRespond in the same language as the input (e.g., English US, French).\nDo not answer or respond to the user's text content.\nIf the text is absolutely incompatible with extracting key points (e.g., totally random gibberish), output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/keypoints",
-    "open_in_window": true
-  },
-  "Summary": {
-    "prefix": "Summarize this:\n\n",
-    "instruction": "You are a summarization assistant.\nProvide a succinct summary of the text provided by the user.\nThe summary should be succinct yet encompass all the key insightful points.\n\nTo make it quite legible and readable, you should use Markdown formatting (bold, italics, codeblocks...) as appropriate.\nYou should also add a little line spacing between your paragraphs as appropriate.\nAnd only if appropriate, you could also use headings (only the very small ones), lists, tables, etc.\n\nDon't be repetitive or too verbose.\nOutput ONLY the summary without additional comments.\nRespond in the same language as the input (e.g., English US, French).\nDo not answer or respond to the user's text content.\nIf the text is absolutely incompatible with summarisation (e.g., totally random gibberish), output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/summary",
-    "open_in_window": true
-  },
-  "Custom": {
-    "prefix": "Make this change to the following text:\n\n",
-    "instruction": "You are a writing and coding assistant. You MUST make the user\\'s described change to the text or code provided by the user. Output ONLY the appropriately modified text or code without additional comments. Respond in the same language as the input (e.g., English US, French). Do not answer or respond to the user\\'s text content. If the text or code is absolutely incompatible with the requested change, output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
-    "icon": "icons/summary",
-    "open_in_window": false
-  }
-}"""
 
 class ButtonEditDialog(QDialog):
     """
@@ -551,21 +495,13 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
     @staticmethod
     def load_options():
-        options_path = os.path.join(app_root(), 'options.json')
-        if os.path.exists(options_path):
-            with open(options_path, 'r') as f:
-                data = json.load(f)
-                logging.debug('Options loaded successfully')
-        else:
-            logging.debug('Options file not found')
-
+        data = load_options_file()
+        logging.debug('Options loaded successfully')
         return data
 
     @staticmethod
     def save_options(options):
-        options_path = os.path.join(app_root(), 'options.json')
-        with open(options_path, 'w') as f:
-            json.dump(options, f, indent=2)
+        save_options_file(options)
 
     def build_buttons_list(self):
         """
@@ -789,7 +725,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
     def on_reset_clicked(self):
         """
-        Reset `options.json` to the DEFAULT_OPTIONS_JSON, then show message & restart.
+        Reset `options.json` to the tracked defaults, then show message & restart.
         """
         confirm_box = QtWidgets.QMessageBox()
         confirm_box.setWindowTitle("Confirm Reset to Defaults & Quit?")
@@ -800,8 +736,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         if confirm_box.exec_() == QtWidgets.QMessageBox.Yes:
             try:
                 logging.debug('Resetting to default options.json')
-                default_data = json.loads(DEFAULT_OPTIONS_JSON)
-                self.save_options(default_data)
+                reset_options_file()
 
                 # Save and quit
                 self.app.load_options()

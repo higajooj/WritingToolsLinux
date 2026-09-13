@@ -123,9 +123,10 @@ for window criteria and rules. Other compositors need their own equivalent.
 
 Settings, including provider credentials, are stored locally in the ignored
 `config.json` beside `main.py`. Keep it private. Custom buttons and their
-shortcuts are stored in the root `options.json`. Text is sent to the provider
-you configure when you invoke writing actions; local providers can keep
-processing on your machine.
+shortcuts are stored in the ignored root `options.json`, which is created from
+the bundled defaults on first launch. Text is sent to the provider you
+configure when you invoke writing actions; local providers can keep processing
+on your machine.
 
 For Ollama, start the server, download a model, and select the Ollama provider
 in Settings with that model's name. Alternatively, use the OpenAI-compatible
@@ -186,7 +187,8 @@ QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
 ```
 
 Update with `git pull`, then reinstall dependencies if `requirements.txt` changed.
-Preserve `config.json` and any customizations to `options.json` when updating.
+Both `config.json` and `options.json` are ignored user data and remain untouched
+by normal source updates; back them up if you want an additional copy.
 
 ## Credits
 

@@ -16,6 +16,16 @@ def asset_root():
     return app_root() / "assets"
 
 
+def options_path():
+    """Return the path to the user's mutable options file."""
+    return app_root() / "options.json"
+
+
+def default_options_path():
+    """Return the path to the tracked default options template."""
+    return asset_root() / "default_options.json"
+
+
 def data_home():
     """Return $XDG_DATA_HOME, falling back to the spec's default location."""
     value = os.environ.get("XDG_DATA_HOME")
