@@ -181,7 +181,7 @@ class ButtonEditDialog(QDialog):
 
     def get_button_data(self):
         data = {
-            "name": self.name_input.text(),
+            "name": self.name_input.text().strip(),
             "prefix": "Make this change to the following text:\n\n",
             # Retrieve multiline text
             "instruction": self.instruction_input.toPlainText(),
@@ -312,7 +312,10 @@ class DraggableButton(QtWidgets.QPushButton):
             bw = self.popup.button_widgets
             bw[source_idx], bw[target_idx] = bw[target_idx], bw[source_idx]
             self.popup.rebuild_grid_layout()
-            self.popup.update_json_from_grid()
+            if not self.popup.update_json_from_grid():
+                # Persistence failed, so put the visible order back too.
+                bw[source_idx], bw[target_idx] = bw[target_idx], bw[source_idx]
+                self.popup.rebuild_grid_layout()
 
         self.setStyleSheet(self.base_style)
         event.setDropAction(QtCore.Qt.MoveAction)
@@ -510,32 +513,54 @@ class CustomPopupWindow(QtWidgets.QWidget):
     def save_options(options):
         save_options_file(options)
 
-    def build_buttons_list(self):
+    def build_buttons_list(self, data=None):
         """
-        Reads options.json, creates DraggableButton for each (except "Custom"),
-        storing them in self.button_widgets in the same order as the JSON file.
+        Creates a DraggableButton for each option (except "Custom") from
+        `data`, or options.json when omitted, storing them in
+        self.button_widgets in the same order.
         """
-        self.button_widgets.clear()
-        data = self.load_options()
+        if data is None:
+            data = self.load_options()
 
-        for k,v in data.items():
-            if k=="Custom":
-                continue
-            b = DraggableButton(self, k, k)
-            icon_path = os.path.join(asset_root(),
-                                    v["icon"] + ('_dark' if colorMode=='dark' else '_light') + '.png')
-            if os.path.exists(icon_path):
-                b.setIcon(QtGui.QIcon(icon_path))
+        new_widgets = []
+        try:
+            for k,v in data.items():
+                if k=="Custom":
+                    continue
+                b = DraggableButton(self, k, k)
+                new_widgets.append(b)
+                icon_path = os.path.join(asset_root(),
+                                        v["icon"] + ('_dark' if colorMode=='dark' else '_light') + '.png')
+                if os.path.exists(icon_path):
+                    b.setIcon(QtGui.QIcon(icon_path))
 
-            # Tooltip surfaces the direct hotkey (if any) for discoverability.
-            # Buttons without a hotkey get no tooltip — keeps things uncluttered.
-            hotkey = (v.get("hotkey") or "").strip()
-            if hotkey:
-                b.setToolTip(f"Direct hotkey: {hotkey}")
+                # Tooltip surfaces the direct hotkey (if any) for discoverability.
+                # Buttons without a hotkey get no tooltip — keeps things uncluttered.
+                hotkey = (v.get("hotkey") or "").strip()
+                if hotkey:
+                    b.setToolTip(f"Direct hotkey: {hotkey}")
 
-            if not self.edit_mode:
-                b.clicked.connect(partial(self.on_generic_instruction, k))
-            self.button_widgets.append(b)
+                if not self.edit_mode:
+                    b.clicked.connect(partial(self.on_generic_instruction, k))
+        except Exception:
+            # Leave the current buttons in place rather than a partial grid.
+            for button in new_widgets:
+                button.hide()
+                button.deleteLater()
+            raise
+
+        old_widgets, self.button_widgets = self.button_widgets, new_widgets
+
+        # Rebuilding used to be followed immediately by terminating the app,
+        # which hid these stale widgets. Live editing must dispose of them so
+        # repeated changes do not leak controls or connected signals.
+        for old_button in old_widgets:
+            old_button.hide()
+            old_button.deleteLater()
+
+        if self.edit_mode:
+            for button in self.button_widgets:
+                self.add_edit_delete_icons(button)
 
     def rebuild_grid_layout(self, parent_layout=None):
         """Rebuild grid layout with consistent sizing and proper Add New button placement."""
@@ -552,9 +577,13 @@ class CustomPopupWindow(QtWidgets.QWidget):
                     if w:
                         grid.removeWidget(w)
                 parent_layout.removeItem(grid)
+                grid.deleteLater()
             elif (item.widget() and isinstance(item.widget(), QPushButton) 
                 and item.widget().text() == "+ Add New"):
-                item.widget().deleteLater()
+                add_button = item.widget()
+                parent_layout.removeWidget(add_button)
+                add_button.hide()
+                add_button.deleteLater()
 
         # Create new grid with fixed column width
         grid = QtWidgets.QGridLayout()
@@ -573,6 +602,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 row += 1
         
         parent_layout.addLayout(grid)
+        # Attaching the grid reparents new buttons, which hides them until a
+        # queued show. Show them now so the window can be fitted right away.
+        for b in self.button_widgets:
+            b.show()
         
         # Add New button (only in edit mode)
         if self.edit_mode:
@@ -594,6 +627,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             """)
             add_btn.clicked.connect(self.add_new_button_clicked)
             parent_layout.addWidget(add_btn)
+            add_btn.show()
 
     def add_edit_delete_icons(self, btn):
         """Add edit/delete icons as overlays with proper spacing."""
@@ -684,19 +718,6 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.reset_button.hide()
             self.drag_label.hide()
 
-            # Inform the user that the app will close to apply changes
-            msg = QtWidgets.QMessageBox()
-            msg.setWindowTitle("Quitting to apply changes...")
-            msg.setText("Writing Tools needs to relaunch to apply your changes & will now quit.\nPlease relaunch Writing Tools to see your changes.")
-            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.exec_()
-
-            self.app.load_options()
-            self.close()
-            # Instead of restarting, simply exit the app:
-            QtCore.QTimer.singleShot(100, self.app.exit_app)
-            return
-
 
         # Update the edit button icon now that icon_name is defined
         icon_path = os.path.join(
@@ -712,51 +733,70 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         # Update button overlays
         for btn in self.button_widgets:
-            try:
-                btn.clicked.disconnect()
-            except:
-                pass
-
             if not self.edit_mode:
                 btn.clicked.connect(partial(self.on_generic_instruction, btn.key))
                 if hasattr(btn, 'icon_container') and btn.icon_container:
                     btn.icon_container.deleteLater()
                     btn.icon_container = None
             else:
+                try:
+                    btn.clicked.disconnect()
+                except RuntimeError:
+                    pass
                 self.add_edit_delete_icons(btn)
 
             btn.setStyleSheet(btn.base_style)
 
         # Rebuild grid layout
         self.rebuild_grid_layout()
+        self._fit_to_contents()
+        if not self.edit_mode:
+            self.custom_input.setFocus()
 
 
     def on_reset_clicked(self):
         """
-        Reset `options.json` to the tracked defaults, then show message & restart.
+        Reset `options.json` to the tracked defaults and apply them immediately.
         """
         confirm_box = QtWidgets.QMessageBox()
-        confirm_box.setWindowTitle("Confirm Reset to Defaults & Quit?")
-        confirm_box.setText("To reset the buttons to their original configuration, Writing Tools would need to quit, so you'd need to relaunch Writing Tools.\nAre you sure you want to continue?")
+        confirm_box.setWindowTitle("Confirm Reset to Defaults?")
+        confirm_box.setText(
+            "Reset all buttons to their original configuration? "
+            "This will replace your custom buttons and edits."
+        )
         confirm_box.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         confirm_box.setDefaultButton(QtWidgets.QMessageBox.No)
         
         if confirm_box.exec_() == QtWidgets.QMessageBox.Yes:
             try:
                 logging.debug('Resetting to default options.json')
-                reset_options_file()
-
-                # Save and quit
-                self.app.load_options()
-                self.close()
-                QtCore.QTimer.singleShot(100, self.app.exit_app)
+                data = reset_options_file()
+                self._activate_options(data)
             
             except Exception as e:
                 logging.error(f"Error resetting options.json: {e}")
-                error_msg = QtWidgets.QMessageBox()
-                error_msg.setWindowTitle("Error")
-                error_msg.setText(f"An error occurred while resetting: {str(e)}")
-                error_msg.exec_()
+                self._show_options_error("resetting the buttons", e)
+
+    def _validate_name(self, name, exclude_button=None):
+        """
+        Check a button name. Names key options.json, so a duplicate would
+        silently replace another button and "Custom" would replace the
+        typed-change prompt. Returns (ok, error_message).
+
+        `exclude_button` is the button being edited, which may keep its name.
+        """
+        if not name:
+            return False, "Please give the button a name."
+        if name == "Custom":
+            return False, (
+                "'Custom' is reserved for changes typed into the popup. "
+                "Pick a different name."
+            )
+        if name != exclude_button and name in self.load_options():
+            return False, (
+                f"A button named '{name}' already exists. Pick a different name."
+            )
+        return True, None
 
     def _validate_hotkey(self, hotkey, exclude_button=None):
         """
@@ -823,10 +863,51 @@ class CustomPopupWindow(QtWidgets.QWidget):
             entry.pop("hotkey", None)
         return entry
 
+    def _fit_to_contents(self):
+        """
+        Resize to the current contents. A top-level window grows with its
+        layout but never shrinks on its own, so removed buttons or leaving
+        edit mode would otherwise leave empty space.
+        """
+        # Activate the inner layout first; otherwise adjustSize() reads the
+        # background's size hint cached from before this change.
+        self.background.layout().activate()
+        self.adjustSize()
+
+    def _show_options_error(self, action, error):
+        error_msg = QtWidgets.QMessageBox(self)
+        error_msg.setWindowTitle("Error")
+        error_msg.setText(f"An error occurred while {action}: {error}")
+        error_msg.exec_()
+
+    def _activate_options(self, data, rebuild=True):
+        """Make already-persisted options live in the app and this popup."""
+        self.app.apply_options(data)
+        if rebuild:
+            self.build_buttons_list(data)
+            self.rebuild_grid_layout()
+            self._fit_to_contents()
+
+    def _commit_options(self, data, rebuild=True):
+        """Persist and activate one editor change without closing the app."""
+        try:
+            self.save_options(data)
+        except Exception as error:
+            logging.error("Error saving options.json: %s", error)
+            self._show_options_error("saving the button changes", error)
+            return False
+
+        self._activate_options(data, rebuild=rebuild)
+        return True
+
     def add_new_button_clicked(self):
         dialog = ButtonEditDialog(self, title="Add New Button")
         while dialog.exec_():
             bd = dialog.get_button_data()
+            ok, err = self._validate_name(bd["name"])
+            if not ok:
+                QtWidgets.QMessageBox.warning(self, "Invalid name", err)
+                continue
             ok, err = self._validate_hotkey(bd.get("hotkey", ""))
             if not ok:
                 QtWidgets.QMessageBox.warning(self, "Invalid hotkey", err)
@@ -835,72 +916,48 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 continue
             data = self.load_options()
             data[bd["name"]] = self._build_button_entry(bd)
-            self.save_options(data)
-
-            self.build_buttons_list()
-            self.rebuild_grid_layout()
-
-            self.hide()
-
-            QtWidgets.QMessageBox.information(
-                self,
-                "Quitting to apply button...",
-                "Writing Tools needs to relaunch to apply your fancy button & will now quit.\nPlease relaunch Writing Tools to see your new button."
-            )
-
-            self.app.load_options()
-            self.close()
-            QtCore.QTimer.singleShot(100, self.app.exit_app)
-            return
+            # A failed save already showed its error; keep the entries.
+            if self._commit_options(data):
+                return
 
 
     def edit_button_clicked(self, btn):
         """User clicked the small pencil icon over a button."""
         key = btn.key
         data = self.load_options()
-        bd = data[key]
+        bd = dict(data[key])
         bd["name"] = key
 
         dialog = ButtonEditDialog(self, bd)
         while dialog.exec_():
             new_data = dialog.get_button_data()
+            new_name = new_data["name"]
             # Pass `exclude_button=key` so we don't flag the button's own
-            # current hotkey as a conflict with itself.
+            # current name or hotkey as a conflict with itself.
+            ok, err = self._validate_name(new_name, exclude_button=key)
+            if not ok:
+                QtWidgets.QMessageBox.warning(self, "Invalid name", err)
+                continue
             ok, err = self._validate_hotkey(new_data.get("hotkey", ""), exclude_button=key)
             if not ok:
                 QtWidgets.QMessageBox.warning(self, "Invalid hotkey", err)
                 continue
             data = self.load_options()
             existing = data.get(key)
-            if new_data["name"] != key:
-                del data[key]
-            data[new_data["name"]] = self._build_button_entry(new_data, existing=existing)
-            self.save_options(data)
-
-            self.build_buttons_list()
-            self.rebuild_grid_layout()
-
-            self.hide()
-
-            # Show message about relaunch requirement
-            QtWidgets.QMessageBox.information(
-                self,
-                "Quitting to apply changes to this button...",
-                "Writing Tools needs to relaunch to apply your changes & will now quit.\nPlease relaunch Writing Tools to see your changes."
-            )
-
-            # Save and quit
-            self.app.load_options()
-            self.close()
-            QtCore.QTimer.singleShot(100, self.app.exit_app)
-            return
+            if new_name != key:
+                # Rename in place so the button keeps its grid position.
+                data = {(new_name if k == key else k): v for k, v in data.items()}
+            data[new_name] = self._build_button_entry(new_data, existing=existing)
+            # A failed save already showed its error; keep the entries.
+            if self._commit_options(data):
+                return
 
     def delete_button_clicked(self, btn):
         """Handle deletion of a button."""
         key = btn.key
         confirm = QtWidgets.QMessageBox()
-        confirm.setWindowTitle("Confirm Delete & Quit?")
-        confirm.setText(f"To delete the '{key}' button, Writing Tools would need to quit, so you'd need to relaunch Writing Tools.\nAre you sure you want to continue?")
+        confirm.setWindowTitle("Confirm Delete?")
+        confirm.setText(f"Delete the '{key}' button?")
         confirm.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         confirm.setDefaultButton(QtWidgets.QMessageBox.No)
         
@@ -908,37 +965,28 @@ class CustomPopupWindow(QtWidgets.QWidget):
             try:
                 data = self.load_options()
                 del data[key]
-                self.save_options(data)
-
-                # Clean up UI elements
-                for btn_ in self.button_widgets[:]:
-                    if btn_.key == key:
-                        if hasattr(btn_, 'icon_container') and btn_.icon_container:
-                            btn_.icon_container.deleteLater()
-                        btn_.deleteLater()
-                        self.button_widgets.remove(btn_)
-                
-                self.app.load_options()
-                self.close()
-                QtCore.QTimer.singleShot(100, self.app.exit_app)
+                self._commit_options(data)
                 
             except Exception as e:
                 logging.error(f"Error deleting button: {e}")
-                error_msg = QtWidgets.QMessageBox()
-                error_msg.setWindowTitle("Error")
-                error_msg.setText(f"An error occurred while deleting the button: {str(e)}")
-                error_msg.exec_()
+                self._show_options_error("deleting the button", e)
 
     def update_json_from_grid(self):
         """
         Called after a drop reorder. Reflect the new order in options.json,
         so that user's custom arrangement persists.
         """
-        data = self.load_options()
-        new_data = {"Custom": data["Custom"]} if "Custom" in data else {}
-        for b in self.button_widgets:
-            new_data[b.key] = data[b.key]
-        self.save_options(new_data)
+        try:
+            data = self.load_options()
+            new_data = {"Custom": data["Custom"]} if "Custom" in data else {}
+            for b in self.button_widgets:
+                new_data[b.key] = data[b.key]
+        except Exception as error:
+            # e.g. unreadable JSON, or a button removed from the file meanwhile.
+            logging.error("Error reading options.json to reorder buttons: %s", error)
+            self._show_options_error("saving the button order", error)
+            return False
+        return self._commit_options(new_data, rebuild=False)
 
     def on_custom_change(self):
         txt = self.custom_input.text().strip()

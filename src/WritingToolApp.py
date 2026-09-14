@@ -322,6 +322,59 @@ class WritingToolApp(QtWidgets.QApplication):
         self.options = load_options_file()
         logging.debug('Options loaded successfully')
 
+    def _build_shortcut_map(self, options, log=False):
+        """
+        Return the shortcut ID -> trigger map to register with the portal.
+
+        Invalid or duplicate triggers are skipped. The first matching trigger
+        wins because the portal cannot dispatch it to two shortcut IDs.
+        """
+        global_shortcut = self.config.get('shortcut', 'ctrl+space')
+        shortcut_map = {'global': global_shortcut}
+        taken = {global_shortcut.strip().lower()}
+
+        # Custom actions need typed input and cannot run directly.
+        for button_name, button_cfg in (options or {}).items():
+            if button_name == 'Custom':
+                continue
+            trigger = (button_cfg.get('hotkey') or '').strip()
+            if not trigger:
+                continue
+            ok, problem = validate_trigger(trigger)
+            if not ok:
+                if log:
+                    logging.error(
+                        f'Invalid hotkey "{trigger}" for button "{button_name}": {problem}'
+                    )
+                continue
+            if trigger.lower() in taken:
+                if log:
+                    logging.warning(
+                        f'Hotkey "{trigger}" for button "{button_name}" '
+                        f'conflicts with an already-registered binding; skipping'
+                    )
+                continue
+            taken.add(trigger.lower())
+            shortcut_map['button:' + button_name] = trigger
+            if log:
+                logging.debug(f'Registering button hotkey: {trigger} -> {button_name}')
+        return shortcut_map
+
+    def apply_options(self, options):
+        """Apply persisted button options to the running application.
+
+        Most edits only change prompts or presentation and need no portal
+        activity. Re-register only when the shortcuts that would be bound
+        changed, keeping ordinary button editing immediate and unobtrusive.
+        """
+        previous_shortcuts = self._build_shortcut_map(self.options)
+        self.options = options
+        current_shortcuts = self._build_shortcut_map(self.options)
+
+        if previous_shortcuts != current_shortcuts:
+            logging.debug('Button hotkeys changed; refreshing portal shortcuts')
+            self.register_hotkey()
+
     def save_config(self, config):
         """
         Save the configuration file.
@@ -343,39 +396,9 @@ class WritingToolApp(QtWidgets.QApplication):
     def start_hotkey_listener(self):
         """
         Register the global and direct button shortcuts with the portal.
-
-        Invalid or duplicate triggers are skipped. The first matching trigger
-        wins because the portal cannot dispatch it to two shortcut IDs.
         """
         try:
-            global_shortcut = self.config.get('shortcut', 'ctrl+space')
-            shortcut_map = {'global': global_shortcut}
-            taken = {global_shortcut.strip().lower()}
-
-            # Custom actions need typed input and cannot run directly.
-            if self.options:
-                for button_name, button_cfg in self.options.items():
-                    if button_name == 'Custom':
-                        continue
-                    trigger = (button_cfg.get('hotkey') or '').strip()
-                    if not trigger:
-                        continue
-                    ok, problem = validate_trigger(trigger)
-                    if not ok:
-                        logging.error(
-                            f'Invalid hotkey "{trigger}" for button "{button_name}": {problem}'
-                        )
-                        continue
-                    if trigger.lower() in taken:
-                        logging.warning(
-                            f'Hotkey "{trigger}" for button "{button_name}" '
-                            f'conflicts with an already-registered binding; skipping'
-                        )
-                        continue
-                    taken.add(trigger.lower())
-                    shortcut_map['button:' + button_name] = trigger
-                    logging.debug(f'Registering button hotkey: {trigger} -> {button_name}')
-
+            shortcut_map = self._build_shortcut_map(self.options, log=True)
             self.input_backend.set_callbacks({k: k for k in shortcut_map})
             self.registered_hotkey = None
             self.input_backend.register(shortcut_map)

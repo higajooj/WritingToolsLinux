@@ -294,7 +294,7 @@ class SettingsWindow(QtWidgets.QWidget):
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
 
-        # Create bottom container for save button and restart notice
+        # Create bottom container for the save button
         bottom_container = QtWidgets.QWidget()
         bottom_container.setStyleSheet("background: transparent;")  # Ensure transparency
         bottom_layout = QtWidgets.QVBoxLayout(bottom_container)
@@ -318,16 +318,6 @@ class SettingsWindow(QtWidgets.QWidget):
         """)
         save_button.clicked.connect(self.save_settings)
         bottom_layout.addWidget(save_button)
-
-        if not self.providers_only:
-            restart_text = "<p style='text-align: center;'>" + \
-            _("Please restart Writing Tools for changes to take effect.") + \
-            "</p>"
-
-            restart_notice = QtWidgets.QLabel(restart_text)
-            restart_notice.setStyleSheet(f"font-size: 15px; color: {'#cccccc' if colorMode == 'dark' else '#555555'}; font-style: italic;")
-            restart_notice.setWordWrap(True)
-            bottom_layout.addWidget(restart_notice)
 
         main_layout.addWidget(bottom_container)
 

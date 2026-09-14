@@ -88,6 +88,11 @@ class WaylandInputBackend:
         self._portal_error = None
         self._entry_error = ""
         self._portal_token = 0
+        # Each stop() starts a new generation. A portal thread that outlives
+        # its join (e.g. waiting on a bind dialog) must only tear down its own
+        # session, never the one registered after it.
+        self._portal_lock = threading.Lock()
+        self._portal_generation = 0
         self._bound_shortcuts = ()
         self._shortcut_callbacks = {}
         self._has_wl_clipboard = bool(shutil.which("wl-paste") and shutil.which("wl-copy"))
@@ -121,17 +126,20 @@ class WaylandInputBackend:
         self._portal_error = None
         self._portal_thread = threading.Thread(
             target=self._run_portal,
-            args=(dict(shortcut_map), BusType, Message, MessageType, MessageBus),
+            args=(self._portal_generation, dict(shortcut_map), BusType, Message, MessageType, MessageBus),
             daemon=True,
         )
         self._portal_thread.start()
 
     def stop(self):
-        thread = self._portal_thread
-        loop = self._portal_loop
-        closed = self._portal_closed
-        if loop is not None and closed is not None:
-            loop.call_soon_threadsafe(self._resolve_closed, closed)
+        with self._portal_lock:
+            self._portal_generation += 1
+            thread = self._portal_thread
+            loop = self._portal_loop
+            closed = self._portal_closed
+            # A running portal thread clears these before its loop closes.
+            if loop is not None and closed is not None:
+                loop.call_soon_threadsafe(self._resolve_closed, closed)
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=2)
         self._portal_thread = None
@@ -146,17 +154,27 @@ class WaylandInputBackend:
         if not closed.done():
             closed.set_result(None)
 
-    def _run_portal(self, shortcut_map, BusType, Message, MessageType, MessageBus):
+    def _run_portal(self, generation, shortcut_map, BusType, Message, MessageType, MessageBus):
         import asyncio
         from dbus_next import Variant
 
+        def is_current():
+            return self._portal_generation == generation
+
         async def run():
             bus = None
+            session_path = None
+            loop = asyncio.get_running_loop()
+            closed = loop.create_future()
+            with self._portal_lock:
+                if not is_current():
+                    return
+                # Publish before connecting so stop() can always end this run.
+                self._portal_loop = loop
+                self._portal_closed = closed
             try:
                 bus = await MessageBus(bus_type=BusType.SESSION).connect()
                 self._portal_bus = bus
-                self._portal_loop = asyncio.get_running_loop()
-                self._portal_closed = self._portal_loop.create_future()
 
                 # Registry.Register must be the first portal call.
                 await self._register_app_id(bus, Message, MessageType)
@@ -171,6 +189,8 @@ class WaylandInputBackend:
                 session_path = self._unwrap(results.get("session_handle"))
                 if not session_path:
                     raise RuntimeError("Portal returned no session handle")
+                if not is_current():
+                    return
                 self._portal_session = session_path
 
                 # dbus-next sends a D-Bus struct from a list, not a tuple.
@@ -186,8 +206,11 @@ class WaylandInputBackend:
                     lambda token: [session_path, shortcuts, "", {"handle_token": Variant("s", token)}],
                 )
 
-                self._bound_shortcuts = tuple(shortcut_map.items())
-                self.capabilities["global_shortcuts"] = True
+                with self._portal_lock:
+                    if not is_current():
+                        return
+                    self._bound_shortcuts = tuple(shortcut_map.items())
+                    self.capabilities["global_shortcuts"] = True
                 bus.add_message_handler(self._portal_signal)
                 logging.info(
                     "Wayland GlobalShortcuts bound for %s: %s",
@@ -197,19 +220,20 @@ class WaylandInputBackend:
                 if hint:
                     logging.info(hint)
                 self._notify_registration(True)
-                await self._portal_closed
+                await closed
             except Exception as exc:
-                self._portal_error = str(exc)
-                self.capabilities["global_shortcuts"] = False
                 logging.warning("Wayland GlobalShortcuts unavailable: %s", exc)
-                self._notify_registration(False)
+                if is_current():
+                    self._portal_error = str(exc)
+                    self.capabilities["global_shortcuts"] = False
+                    self._notify_registration(False)
             finally:
                 if bus is not None:
-                    if self._portal_session:
+                    if session_path:
                         try:
                             reply = await bus.call(Message(
                                 destination=PORTAL_BUS,
-                                path=self._portal_session,
+                                path=session_path,
                                 interface="org.freedesktop.portal.Session",
                                 member="Close",
                             ))
@@ -220,7 +244,14 @@ class WaylandInputBackend:
                         except Exception:
                             logging.debug("Portal session close failed", exc_info=True)
                     bus.disconnect()
-                self._portal_bus = None
+                with self._portal_lock:
+                    # stop() resets state for a superseded run; a run that
+                    # ended on its own must not leave a closed loop behind.
+                    if is_current():
+                        self._portal_bus = None
+                        self._portal_loop = None
+                        self._portal_closed = None
+                        self._portal_session = None
 
         asyncio.run(run())
 

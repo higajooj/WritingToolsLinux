@@ -20,7 +20,7 @@ msgstr ""
 "#-#-#-#-#  CustomPopupWindow.pot (PACKAGE VERSION)  #-#-#-#-#\n"
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-05 15:53-0400\n"
+"POT-Creation-Date: 2026-09-14 01:53-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -42,7 +42,7 @@ msgstr ""
 "#-#-#-#-#  ResponseWindow.pot (PACKAGE VERSION)  #-#-#-#-#\n"
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-05 15:14-0400\n"
+"POT-Creation-Date: 2026-09-13 17:23-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -53,7 +53,7 @@ msgstr ""
 "#-#-#-#-#  SettingsWindow.pot (PACKAGE VERSION)  #-#-#-#-#\n"
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-05 16:21-0400\n"
+"POT-Creation-Date: 2026-09-14 01:50-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -64,7 +64,7 @@ msgstr ""
 "#-#-#-#-#  WritingToolApp.pot (PACKAGE VERSION)  #-#-#-#-#\n"
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-05 16:35-0400\n"
+"POT-Creation-Date: 2026-09-14 01:50-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -144,8 +144,12 @@ msgstr ""
 msgid "Helped add the start-on-boot setting."
 msgstr ""
 
-#: src/ui/CustomPopupWindow.py:509
+#: src/ui/CustomPopupWindow.py:463 src/ui/CustomPopupWindow.py:944
 msgid "Describe your change..."
+msgstr ""
+
+#: src/ui/CustomPopupWindow.py:946
+msgid "Add instructions (optional)..."
 msgstr ""
 
 #: src/ui/OnboardingWindow.py:26 src/ui/OnboardingWindow.py:42
@@ -207,30 +211,30 @@ msgstr ""
 msgid "Next"
 msgstr ""
 
-#: src/ui/ResponseWindow.py:303
+#: src/ui/ResponseWindow.py:297
 msgid "Response"
 msgstr ""
 
-#: src/ui/ResponseWindow.py:385
+#: src/ui/ResponseWindow.py:384
 msgid "Select to copy with formatting"
 msgstr ""
 
-#: src/ui/ResponseWindow.py:390
+#: src/ui/ResponseWindow.py:389
 msgid "Copy as Markdown"
 msgstr ""
 
-#: src/ui/ResponseWindow.py:401 src/ui/ResponseWindow.py:513
-#: src/ui/ResponseWindow.py:515 src/ui/ResponseWindow.py:522
-#: src/ui/ResponseWindow.py:526
+#: src/ui/ResponseWindow.py:400 src/ui/ResponseWindow.py:516
+#: src/ui/ResponseWindow.py:518 src/ui/ResponseWindow.py:525
+#: src/ui/ResponseWindow.py:529
 msgid "Thinking"
 msgstr ""
 
-#: src/ui/ResponseWindow.py:435 src/ui/ResponseWindow.py:536
+#: src/ui/ResponseWindow.py:434 src/ui/ResponseWindow.py:539
 msgid "Ask a follow-up question"
 msgstr ""
 
 #: src/ui/SettingsWindow.py:36 src/ui/SettingsWindow.py:157
-#: src/ui/SettingsWindow.py:211 src/WritingToolApp.py:754
+#: src/ui/SettingsWindow.py:211 src/WritingToolApp.py:812
 msgid "Settings"
 msgstr ""
 
@@ -258,26 +262,26 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
-#: src/ui/SettingsWindow.py:324
-msgid "Please restart Writing Tools for changes to take effect."
-msgstr ""
-
-#: src/ui/SettingsWindow.py:347
+#: src/ui/SettingsWindow.py:337
 msgid "Provider setup incomplete"
 msgstr ""
 
-#: src/WritingToolApp.py:758 src/WritingToolApp.py:773
+#: src/WritingToolApp.py:757
+msgid "WritingTools — Ready to paste"
+msgstr ""
+
+#: src/WritingToolApp.py:816 src/WritingToolApp.py:831
 msgid "Resume"
 msgstr ""
 
-#: src/WritingToolApp.py:758 src/WritingToolApp.py:773
+#: src/WritingToolApp.py:816 src/WritingToolApp.py:831
 msgid "Pause"
 msgstr ""
 
-#: src/WritingToolApp.py:762
+#: src/WritingToolApp.py:820
 msgid "About"
 msgstr ""
 
-#: src/WritingToolApp.py:766
+#: src/WritingToolApp.py:824
 msgid "Exit"
 msgstr ""

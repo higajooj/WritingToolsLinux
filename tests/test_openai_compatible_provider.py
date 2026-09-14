@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import httpx
 from openai import OpenAI
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -215,6 +215,29 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
                 restarted_provider.load_config(saved_provider)
                 self.assertEqual(restarted_provider.get_response("Proofread.", "Text."), "Corrected text.")
                 self.assertNotIn("authorization", self.requests[-1].headers)
+
+    def test_general_settings_apply_live_without_restart_guidance(self):
+        self.app.providers = [self.provider]
+        self.app.config = {
+            "provider": self.provider.provider_name,
+            "shortcut": "ctrl+space",
+            "theme": "gradient",
+            "providers": {self.provider.provider_name: self.config | {"api_key": ""}},
+        }
+        window = SettingsWindow(self.app, providers_only=False)
+        self.addCleanup(window.deleteLater)
+
+        label_text = " ".join(label.text() for label in window.findChildren(QLabel))
+        self.assertNotIn("restart Writing Tools", label_text)
+
+        window.shortcut_input.setText("ctrl+shift+space")
+        window.plain_radio.setChecked(True)
+        window.save_settings()
+
+        self.assertEqual(self.app.config["shortcut"], "ctrl+shift+space")
+        self.assertEqual(self.app.config["theme"], "plain")
+        self.assertIs(self.app.current_provider, self.provider)
+        self.app.register_hotkey.assert_called_once_with()
 
 
 if __name__ == "__main__":
