@@ -234,7 +234,7 @@ class ChatContentScrollArea(QScrollArea):
         self.layout.addWidget(msg_container)
         self.layout.addStretch()
         
-        QtCore.QTimer.singleShot(50, self.post_message_updates)
+        QtCore.QTimer.singleShot(50, self, self.post_message_updates)
         
         return text_display
 
@@ -673,7 +673,7 @@ class ResponseWindow(QtWidgets.QWidget):
         self.stop_thinking_animation()
         self._add_message(text)
         
-        QtCore.QTimer.singleShot(100, self._adjust_window_height)
+        QtCore.QTimer.singleShot(100, self, self._adjust_window_height)
         
     @Slot(str)
     def handle_followup_response(self, response_text):
@@ -692,7 +692,7 @@ class ResponseWindow(QtWidgets.QWidget):
         self.input_field.setEnabled(True)
         
         # Update window height
-        QtCore.QTimer.singleShot(100, self._adjust_window_height)
+        QtCore.QTimer.singleShot(100, self, self._adjust_window_height)
         
     def send_message(self):
         """Send a new message/question"""

@@ -520,7 +520,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.rebuild_grid_layout(content_layout)
 
         logging.debug('CustomPopupWindow UI setup complete')
-        QtCore.QTimer.singleShot(250, lambda: self.custom_input.setFocus())
+        # Bind the timer to this widget: the connection dies with it, so a
+        # popup replaced or closed inside 250ms never focuses a dead QLineEdit.
+        QtCore.QTimer.singleShot(250, self, lambda: self.custom_input.setFocus())
 
     @staticmethod
     def load_options():

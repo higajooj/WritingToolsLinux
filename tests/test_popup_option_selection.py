@@ -76,6 +76,22 @@ class PopupOptionSelectionTests(unittest.TestCase):
     def button(self, key):
         return next(button for button in self.window.button_widgets if button.key == key)
 
+    def test_focus_timer_does_not_outlive_the_popup(self):
+        """A popup torn down before its focus timer fires must not touch the
+        deleted QLineEdit.  PySide reports such a failure through sys.excepthook
+        rather than raising into the test, so the hook is what we assert on."""
+        window = CustomPopupWindow(self.app)
+        window.show()
+        window.close()
+        window.deleteLater()
+        QtWidgets.QApplication.processEvents()  # runs the pending delete
+
+        errors = []
+        with patch.object(sys, "excepthook", lambda _t, exc, _tb: errors.append(exc)):
+            QTest.qWait(400)  # past the 250ms focus timer
+
+        self.assertEqual(errors, [])
+
     def test_click_selects_option_without_dispatching_or_closing(self):
         self.button("Proofread").click()
 

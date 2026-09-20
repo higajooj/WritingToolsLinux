@@ -522,7 +522,11 @@ class WritingToolApp(QtWidgets.QApplication):
             self.popup_window.adjustSize()
             # Ensure the popup it's focused, even on lower-end machines
             self.popup_window.activateWindow()
-            QtCore.QTimer.singleShot(100, self.popup_window.custom_input.setFocus)
+            # The popup is the timer's context, so a popup replaced by another
+            # hotkey press inside 100ms cancels this instead of focusing a dead
+            # QLineEdit.
+            popup = self.popup_window
+            QtCore.QTimer.singleShot(100, popup, popup.custom_input.setFocus)
 
             # Wayland clients cannot position top-level windows.
             logging.debug('Leaving popup placement to the compositor')
