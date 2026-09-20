@@ -61,7 +61,7 @@ class PopupOptionSelectionTests(unittest.TestCase):
             "load_options",
             side_effect=lambda: copy.deepcopy(OPTIONS),
         )
-        self.options_patch.start()
+        self.load_options_mock = self.options_patch.start()
         self.window = CustomPopupWindow(self.app)
         self.window.show()
         QtWidgets.QApplication.processEvents()
@@ -385,20 +385,59 @@ class PopupOptionSelectionTests(unittest.TestCase):
         self.button("New Action").click()
         self.assertEqual(self.window.selected_option, "New Action")
 
-    def drop(self, source_key, target_key):
-        source_index = self.window.button_widgets.index(self.button(source_key))
+    def use_buttons(self, names):
+        options = {
+            name: copy.deepcopy(OPTIONS["Proofread"])
+            for name in names
+        }
+        options["Custom"] = copy.deepcopy(OPTIONS["Custom"])
+        self.load_options_mock.side_effect = lambda: copy.deepcopy(options)
+        self.window.build_buttons_list(options)
+        self.window.rebuild_grid_layout()
+        QtWidgets.QApplication.processEvents()
+        return options
+
+    def order(self):
+        return [button.key for button in self.window.button_widgets]
+
+    def index_mime(self, source_index):
         mime = QtCore.QMimeData()
         mime.setData("application/x-button-index", str(source_index).encode())
-        event = QtGui.QDropEvent(
-            QtCore.QPointF(5, 5),
+        return mime
+
+    def drag_mime(self, source_key):
+        return self.index_mime(self.window.button_widgets.index(self.button(source_key)))
+
+    def drag_enter(self, target, mime, side="before"):
+        x = 5 if side == "before" else target.width() - 5
+        return QtGui.QDragEnterEvent(
+            QtCore.QPoint(x, 5),
             QtCore.Qt.MoveAction,
             mime,
             QtCore.Qt.LeftButton,
             QtCore.Qt.NoModifier,
         )
-        self.button(target_key).dropEvent(event)
+
+    def drop(self, source_key, target_key, side="before", source_index=None):
+        """Drop on `target_key`'s chosen half; `source_index` forges the payload."""
+        target = self.button(target_key)
+        x = 5 if side == "before" else target.width() - 5
+        mime = (
+            self.drag_mime(source_key) if source_index is None
+            else self.index_mime(source_index)
+        )
+        event = QtGui.QDropEvent(
+            QtCore.QPointF(x, 5),
+            QtCore.Qt.MoveAction,
+            mime,
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier,
+        )
+        target.dropEvent(event)
+        return event
 
     def test_failed_reorder_restores_original_order(self):
+        self.use_buttons(["A", "B", "C", "D", "E"])
         failures = {
             "save": patch.object(self.window, "save_options", side_effect=OSError("read-only")),
             "load": patch.object(CustomPopupWindow, "load_options", side_effect=ValueError("bad JSON")),
@@ -408,12 +447,12 @@ class PopupOptionSelectionTests(unittest.TestCase):
         for failure, failing_patch in failures.items():
             with self.subTest(failure=failure):
                 with failing_patch, patch.object(self.window, "_show_options_error") as show_error:
-                    self.drop("Summary", "Proofread")
+                    self.drop("E", "B", side="before")
 
                 show_error.assert_called_once()
                 self.assertEqual(
                     [button.key for button in self.window.button_widgets],
-                    ["Proofread", "Summary"],
+                    ["A", "B", "C", "D", "E"],
                 )
 
         self.app.apply_options.assert_not_called()
@@ -429,6 +468,170 @@ class PopupOptionSelectionTests(unittest.TestCase):
             [button.key for button in self.window.button_widgets],
             ["Summary", "Proofread"],
         )
+
+    def test_reorder_inserts_and_shifts_buttons_instead_of_swapping(self):
+        self.use_buttons(["A", "B", "C", "D", "E"])
+        self.window.toggle_edit_mode()
+
+        with patch.object(self.window, "save_options") as save_options:
+            self.drop("E", "B", side="before")
+
+        self.assertEqual(
+            [button.key for button in self.window.button_widgets],
+            ["A", "E", "B", "C", "D"],
+        )
+        self.assertEqual(
+            list(save_options.call_args.args[0]),
+            ["Custom", "A", "E", "B", "C", "D"],
+        )
+
+    def test_reorder_forward_adjusts_the_insertion_index(self):
+        self.use_buttons(["A", "B", "C", "D", "E"])
+        self.window.toggle_edit_mode()
+
+        with patch.object(self.window, "save_options"):
+            self.drop("A", "D", side="after")
+
+        self.assertEqual(
+            [button.key for button in self.window.button_widgets],
+            ["B", "C", "D", "A", "E"],
+        )
+
+    def test_reorder_supports_first_last_and_no_op_gaps(self):
+        self.use_buttons(["A", "B", "C", "D", "E"])
+        self.window.toggle_edit_mode()
+
+        with patch.object(self.window, "save_options") as save_options:
+            # To the front, then back to the end.
+            self.drop("E", "A", side="before")
+            self.assertEqual(self.order(), ["E", "A", "B", "C", "D"])
+            self.drop("E", "D", side="after")
+            self.assertEqual(self.order(), ["A", "B", "C", "D", "E"])
+
+            # Dropping on yourself, and into the gap you already fill, are
+            # both no-ops that must not cost a save.
+            self.drop("B", "B", side="before")
+            self.assertEqual(self.order(), ["A", "B", "C", "D", "E"])
+            self.drop("B", "A", side="after")
+            self.assertEqual(self.order(), ["A", "B", "C", "D", "E"])
+
+        self.assertEqual(save_options.call_count, 2)
+
+    def test_drag_indicator_tracks_pointer_half_and_clears(self):
+        self.window.toggle_edit_mode()
+        target = self.button("Proofread")
+        other = self.button("Summary")
+        mime = self.drag_mime("Summary")
+
+        enter = QtGui.QDragEnterEvent(
+            QtCore.QPoint(5, 5),
+            QtCore.Qt.MoveAction,
+            mime,
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier,
+        )
+        target.dragEnterEvent(enter)
+        self.assertIs(self.window.drop_indicator_button, target)
+        self.assertEqual(self.window.drop_indicator_side, "before")
+        self.assertIn("border-left", target.styleSheet())
+
+        move = QtGui.QDragMoveEvent(
+            QtCore.QPoint(target.width() - 5, 5),
+            QtCore.Qt.MoveAction,
+            mime,
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier,
+        )
+        target.dragMoveEvent(move)
+        self.assertEqual(self.window.drop_indicator_side, "after")
+        self.assertIn("border-right", target.styleSheet())
+        self.assertNotIn("border-left: 3px solid", target.styleSheet())
+
+        target.dragLeaveEvent(QtGui.QDragLeaveEvent())
+        self.assertIsNone(self.window.drop_indicator_button)
+        self.assertEqual(target.styleSheet(), target.base_style)
+
+        self.window.show_drop_indicator(other, "before")
+        self.window.rebuild_grid_layout()
+        self.assertIsNone(self.window.drop_indicator_button)
+        self.assertEqual(other.styleSheet(), other.base_style)
+
+        self.window.show_drop_indicator(target, "after")
+        self.window.toggle_edit_mode()
+        self.assertIsNone(self.window.drop_indicator_button)
+        self.assertEqual(target.styleSheet(), target.base_style)
+
+    def test_indicator_handoff_survives_either_enter_leave_order(self):
+        self.window.toggle_edit_mode()
+        first = self.button("Proofread")
+        second = self.button("Summary")
+        mime = self.drag_mime("Summary")
+
+        # Crossing from one button to the next, Qt may deliver dragLeave on the
+        # button being left either before or after dragEnter on the one being
+        # entered. Exactly one indicator must survive, on the entered button.
+        first.dragEnterEvent(self.drag_enter(first, mime))
+        first.dragLeaveEvent(QtGui.QDragLeaveEvent())
+        second.dragEnterEvent(self.drag_enter(second, mime))
+
+        self.assertIs(self.window.drop_indicator_button, second)
+        self.assertEqual(first.styleSheet(), first.base_style)
+
+        # Same crossing, opposite delivery order: the late dragLeave must not
+        # take down the indicator the new button already claimed.
+        first.dragEnterEvent(self.drag_enter(first, mime))
+        second.dragLeaveEvent(QtGui.QDragLeaveEvent())
+
+        self.assertIs(self.window.drop_indicator_button, first)
+        self.assertEqual(second.styleSheet(), second.base_style)
+        self.assertIn("border-left: 3px solid", first.styleSheet())
+
+    def test_stale_drag_payload_is_rejected(self):
+        self.use_buttons(["A", "B", "C"])
+        self.window.toggle_edit_mode()
+        self.app.apply_options.reset_mock()
+
+        with patch.object(self.window, "save_options") as save_options:
+            for source_index in (3, 99, -1):
+                with self.subTest(source_index=source_index):
+                    self.window.show_drop_indicator(self.button("B"), "before")
+                    event = self.drop("A", "B", source_index=source_index)
+
+                    self.assertFalse(event.isAccepted())
+                    self.assertEqual(self.order(), ["A", "B", "C"])
+                    self.assertIsNone(self.window.drop_indicator_button)
+
+        save_options.assert_not_called()
+        self.app.apply_options.assert_not_called()
+
+    def test_drop_clears_indicator(self):
+        self.window.toggle_edit_mode()
+        target = self.button("Proofread")
+        self.window.show_drop_indicator(target, "before")
+
+        with patch.object(self.window, "save_options"):
+            self.drop("Summary", "Proofread", side="before")
+
+        self.assertIsNone(self.window.drop_indicator_button)
+        self.assertEqual(target.styleSheet(), target.base_style)
+
+    def test_cancelled_drag_clears_indicator(self):
+        self.window.toggle_edit_mode()
+        source = self.button("Summary")
+        target = self.button("Proofread")
+        self.window.show_drop_indicator(target, "before")
+        source.drag_start_position = QtCore.QPoint(1, 1)
+        mouse_event = Mock()
+        mouse_event.buttons.return_value = QtCore.Qt.LeftButton
+        mouse_event.pos.return_value = QtCore.QPoint(30, 1)
+        drag = Mock()
+        drag.exec_.return_value = QtCore.Qt.IgnoreAction
+
+        with patch("ui.CustomPopupWindow.QtGui.QDrag", return_value=drag):
+            source.mouseMoveEvent(mouse_event)
+
+        self.assertIsNone(self.window.drop_indicator_button)
+        self.assertEqual(target.styleSheet(), target.base_style)
 
     def test_deleting_button_applies_immediately(self):
         self.window.toggle_edit_mode()

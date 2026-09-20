@@ -282,22 +282,36 @@ class DraggableButton(QtWidgets.QPushButton):
             drag.setHotSpot(event.pos())
 
             self.drag_start_position = None
-            drop_action = drag.exec_(QtCore.Qt.MoveAction)
+            try:
+                drop_action = drag.exec_(QtCore.Qt.MoveAction)
+            finally:
+                # A cancelled drag has no drop event to remove the indicator.
+                self.popup.clear_drop_indicator()
             logging.debug(f"Drag completed with action: {drop_action}")
+
+    def _drop_side(self, event):
+        """Return which edge of this button represents the insertion gap."""
+        return "before" if event.position().x() < self.width() / 2 else "after"
+
+    def _update_drop_indicator(self, event):
+        self.popup.show_drop_indicator(self, self._drop_side(event))
 
     def dragEnterEvent(self, event):
         if self.popup.edit_mode and event.mimeData().hasFormat("application/x-button-index"):
+            self._update_drop_indicator(event)
             event.acceptProposedAction()
-            self.setStyleSheet(self.base_style + """
-                QPushButton {
-                    border: 2px dashed #666;
-                }
-            """)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if self.popup.edit_mode and event.mimeData().hasFormat("application/x-button-index"):
+            self._update_drop_indicator(event)
+            event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragLeaveEvent(self, event):
-        self.setStyleSheet(self.base_style)
+        self.popup.clear_drop_indicator(self)
         event.accept()
 
     def dropEvent(self, event):
@@ -306,18 +320,34 @@ class DraggableButton(QtWidgets.QPushButton):
             return
 
         source_idx = int(event.mimeData().data("application/x-button-index").data().decode())
-        target_idx = self.popup.button_widgets.index(self)
+        bw = self.popup.button_widgets
+        # The payload is only as fresh as the moment the drag started, so the
+        # buttons it indexed may already be gone. Drop it rather than moving
+        # whichever button happens to sit at that index now.
+        if not 0 <= source_idx < len(bw):
+            logging.debug(f"Ignoring stale drag payload with index {source_idx}")
+            self.popup.clear_drop_indicator()
+            event.ignore()
+            return
 
-        if source_idx != target_idx:
-            bw = self.popup.button_widgets
-            bw[source_idx], bw[target_idx] = bw[target_idx], bw[source_idx]
+        target_idx = self.popup.button_widgets.index(self)
+        insert_after = self._drop_side(event) == "after"
+        insertion_idx = target_idx + (1 if insert_after else 0)
+        original_order = list(self.popup.button_widgets)
+
+        dragged_button = bw.pop(source_idx)
+        if source_idx < insertion_idx:
+            insertion_idx -= 1
+        bw.insert(insertion_idx, dragged_button)
+
+        self.popup.clear_drop_indicator()
+        if bw != original_order:
             self.popup.rebuild_grid_layout()
             if not self.popup.update_json_from_grid():
                 # Persistence failed, so put the visible order back too.
-                bw[source_idx], bw[target_idx] = bw[target_idx], bw[source_idx]
+                bw[:] = original_order
                 self.popup.rebuild_grid_layout()
 
-        self.setStyleSheet(self.base_style)
         event.setDropAction(QtCore.Qt.MoveAction)
         event.acceptProposedAction()
 
@@ -342,6 +372,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.input_area = None
         
         self.button_widgets = []
+        self.drop_indicator_button = None
+        self.drop_indicator_side = None
 
         logging.debug('Initializing CustomPopupWindow')
         self.init_ui()
@@ -519,6 +551,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         `data`, or options.json when omitted, storing them in
         self.button_widgets in the same order.
         """
+        self.clear_drop_indicator()
         if data is None:
             data = self.load_options()
 
@@ -564,6 +597,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
     def rebuild_grid_layout(self, parent_layout=None):
         """Rebuild grid layout with consistent sizing and proper Add New button placement."""
+        self.clear_drop_indicator()
         if not parent_layout:
             parent_layout = self.background.layout()
 
@@ -628,6 +662,39 @@ class CustomPopupWindow(QtWidgets.QWidget):
             add_btn.clicked.connect(self.add_new_button_clicked)
             parent_layout.addWidget(add_btn)
             add_btn.show()
+
+    def show_drop_indicator(self, button, side):
+        """Show the one active insertion marker on ``button``'s chosen edge."""
+        if self.drop_indicator_button is button and self.drop_indicator_side == side:
+            return
+
+        self.clear_drop_indicator()
+        indicator_color = "#eeeeee" if colorMode == "dark" else "#777777"
+        indicator_edge = "left" if side == "before" else "right"
+        button.setStyleSheet(
+            button.base_style
+            + f"""
+                QPushButton {{
+                    border-{indicator_edge}: 3px solid {indicator_color};
+                }}
+            """
+        )
+        self.drop_indicator_button = button
+        self.drop_indicator_side = side
+
+    def clear_drop_indicator(self, button=None):
+        """Remove the insertion marker, optionally only when owned by ``button``."""
+        active_button = self.drop_indicator_button
+        if button is not None and active_button is not button:
+            return
+        if active_button is not None:
+            try:
+                active_button.setStyleSheet(active_button.base_style)
+            except RuntimeError:
+                # Already destroyed by a rebuild that skipped clearing first.
+                pass
+        self.drop_indicator_button = None
+        self.drop_indicator_side = None
 
     def add_edit_delete_icons(self, btn):
         """Add edit/delete icons as overlays with proper spacing."""
@@ -731,7 +798,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
         # Toggle the main input area
         self.input_area.setVisible(not self.edit_mode)
 
-        # Update button overlays
+        # Update button overlays. The loop resets every stylesheet below, so
+        # drop the indicator first rather than leaving it tracked but invisible.
+        self.clear_drop_indicator()
         for btn in self.button_widgets:
             if not self.edit_mode:
                 btn.clicked.connect(partial(self.on_generic_instruction, btn.key))
