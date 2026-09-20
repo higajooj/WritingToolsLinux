@@ -943,6 +943,28 @@ class ResponseHistoryTests(unittest.TestCase):
             ],
         )
 
+    def test_window_displays_original_clipboard_text_before_response(self):
+        class App(QtCore.QObject):
+            followup_response_signal = Signal(str)
+
+        app = App()
+        app.config = {}
+        window = ResponseWindow(app, "Summary Result")
+        self.addCleanup(window.deleteLater)
+
+        with patch("ui.ResponseWindow.QtCore.QTimer.singleShot"):
+            window.display_original_text("Long text")
+
+            first_display = window.chat_area.layout.itemAt(0).widget().layout().itemAt(0).widget()
+            self.assertTrue(first_display.is_user_message)
+            self.assertIn("Long text", first_display.toPlainText())
+
+            window.set_text("Short summary")
+
+        second_display = window.chat_area.layout.itemAt(1).widget().layout().itemAt(0).widget()
+        self.assertFalse(second_display.is_user_message)
+        self.assertIn("Short summary", second_display.toPlainText())
+
 
 if __name__ == "__main__":
     unittest.main()

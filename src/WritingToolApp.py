@@ -716,6 +716,7 @@ class WritingToolApp(QtWidgets.QApplication):
         """
         response_window = ui.ResponseWindow.ResponseWindow(self, f"{option} Result")
         response_window.selected_text = text  # Store the text for regeneration
+        response_window.display_original_text(text)
         response_window.show()
         return response_window
 

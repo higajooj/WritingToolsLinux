@@ -596,6 +596,10 @@ class ResponseWindow(QtWidgets.QWidget):
             is_user=is_user,
             zoom_factor=self.zoom_factor,
         )
+
+    def display_original_text(self, text):
+        """Show the clipboard text that started this window-mode request."""
+        self._add_message(text, is_user=True)
         
     def _adjust_window_height(self):
         """Calculate and set the ideal window height"""
