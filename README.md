@@ -249,3 +249,10 @@ Fixed an issue that caused the app to fail in completing requests when the OpenA
 ## License
 
 Distributed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
+
+The bundled icons are third-party assets under their own permissive licenses:
+the action icons come from [Lucide](https://lucide.dev) (ISC, partly derived
+from Feather under MIT) and the provider brand marks from
+[Simple Icons](https://simpleicons.org) (CC0). See
+[assets/icons/NOTICE](assets/icons/NOTICE) for the full texts and the
+trademark note on the provider marks.

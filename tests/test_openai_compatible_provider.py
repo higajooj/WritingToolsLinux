@@ -1,4 +1,4 @@
-"""Run with: QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests"""
+"""OpenAI-compatible provider behavior."""
 
 import json
 import os
@@ -10,6 +10,11 @@ from unittest.mock import Mock, patch
 
 import httpx
 from openai import OpenAI
+
+# Qt must be pinned to the offscreen platform before PySide6 is imported.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import qt_offscreen  # noqa: F401,E402
+
 from PySide6.QtWidgets import QApplication, QLabel
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))

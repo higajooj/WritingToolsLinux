@@ -1,7 +1,6 @@
 """Popup option selection and per-run instruction behavior."""
 
 import copy
-import os
 from pathlib import Path
 import sys
 import threading
@@ -9,7 +8,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Qt must be pinned to the offscreen platform before PySide6 is imported.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import qt_offscreen  # noqa: F401,E402
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Signal, Slot

@@ -9,6 +9,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+# Qt must be pinned to the offscreen platform before PySide6 is imported.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import qt_offscreen  # noqa: F401,E402
+
 from PySide6 import QtCore
 from PySide6.QtWidgets import QApplication, QVBoxLayout
 
