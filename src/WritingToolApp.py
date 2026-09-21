@@ -1,4 +1,3 @@
-import gettext
 import json
 import logging
 import os
@@ -21,14 +20,11 @@ from aiprovider import (
     obfuscate_api_key,
 )
 from PySide6 import QtCore, QtGui, QtWidgets
-from PySide6.QtCore import QLocale, Signal, Slot
-from PySide6.QtWidgets import QApplication, QMessageBox
-from app_paths import app_root, asset_root, options_path
+from PySide6.QtCore import Signal, Slot
+from PySide6.QtWidgets import QMessageBox
+from app_paths import CONFIG_VERSION, app_root, asset_root, options_path
 from options_store import load_options as load_options_file
 from platform_input import APP_ID, WaylandInputBackend, validate_trigger
-
-_ = gettext.gettext
-
 
 class _SelectedTextHolder:
     """
@@ -87,8 +83,6 @@ class WritingToolApp(QtWidgets.QApplication):
         self.current_text_holder = None
         self._capture_lock = threading.Lock()
 
-        self._ = gettext.gettext
-
         # Initialize the ctrl+c hotkey listener
         self.ctrl_c_timer = None
         self.setup_ctrl_c_listener()
@@ -120,49 +114,9 @@ class WritingToolApp(QtWidgets.QApplication):
             self.create_tray_icon()
             self.register_hotkey()
 
-            try:
-                lang = self.config['locale']
-            except KeyError:
-                lang = None
-            self.change_language(lang)
-
         self.recent_triggers = []  # Track recent hotkey triggers
         self.TRIGGER_WINDOW = 1.5  # Time window in seconds
         self.MAX_TRIGGERS = 3  # Max allowed triggers in window
-
-    def setup_translations(self, lang=None):
-        if not lang:
-            lang = QLocale.system().name().split('_')[0]
-
-        try:
-            translation = gettext.translation(
-                'messages',
-                localedir=os.path.join(asset_root(), 'locales'),
-                languages=[lang]
-            )
-        except FileNotFoundError:
-            translation = gettext.NullTranslations()
-
-        translation.install()
-        # Update the translation function for all UI components.
-        self._ = translation.gettext
-        ui.AboutWindow._ = self._
-        ui.SettingsWindow._ = self._
-        ui.ResponseWindow._ = self._
-        ui.OnboardingWindow._ = self._
-        ui.CustomPopupWindow._ = self._
-
-    def retranslate_ui(self):
-        self.update_tray_menu()
-
-    def change_language(self, lang):
-        self.setup_translations(lang)
-        self.retranslate_ui()
-
-        # Update all other windows
-        for widget in QApplication.topLevelWidgets():
-            if widget != self and hasattr(widget, 'retranslate_ui'):
-                widget.retranslate_ui()
 
     def check_trigger_spam(self):
         """
@@ -198,12 +152,12 @@ class WritingToolApp(QtWidgets.QApplication):
     def _migrate_config(self):
         """
         One-shot config migration. Catches any user up to the current schema
-        (v9) regardless of where they started — v7, v8, or already current —
+        (v10) regardless of where they started — v7, v8, or already current —
         in a single pass with at most one restart.
 
         Each version is gated on its own `is_config_file_updated_for_v{N}`
         flag, so re-running this is a no-op once everything's caught up.
-        Bump CURRENT_CONFIG_VERSION and add a `# v{N}` block when adding a
+        Bump CONFIG_VERSION in app_paths and add a `# v{N}` block when adding a
         new migration step.
 
         v8 (introduced 2025):
@@ -223,8 +177,11 @@ class WritingToolApp(QtWidgets.QApplication):
             who picked, say, `gemini-3.1-pro-preview` doesn't get reset.
           • SDK migration to `google-genai` is code-side only; nothing to
             do in config.
+
+        v10 (introduced 2026):
+          • Remove the obsolete locale preference now that the application
+            ships its English UI text directly in code.
         """
-        CURRENT_CONFIG_VERSION = 9
         # Default for new installs and migrating users.
         NEW_DEFAULT_MODEL = 'gemini-flash-latest'
         # v8 -> v9 model mapping. Every retired preset is bumped to the new
@@ -244,12 +201,16 @@ class WritingToolApp(QtWidgets.QApplication):
 
         needs_v8 = not self.config.get('is_config_file_updated_for_v8', False)
         needs_v9 = not self.config.get('is_config_file_updated_for_v9', False)
+        needs_v10 = not self.config.get('is_config_file_updated_for_v10', False)
 
-        if not needs_v8 and not needs_v9:
+        if not needs_v8 and not needs_v9 and not needs_v10:
             logging.debug('Config already up-to-date, no migration needed')
             return
 
-        logging.info(f'Running config migration (needs_v8={needs_v8}, needs_v9={needs_v9})...')
+        logging.info(
+            'Running config migration '
+            f'(needs_v8={needs_v8}, needs_v9={needs_v9}, needs_v10={needs_v10})...'
+        )
 
         config_changed = False
         gemini_config = (
@@ -291,10 +252,13 @@ class WritingToolApp(QtWidgets.QApplication):
                     logging.info(f'[v9] Bumped Gemini model "{old_model}" -> "{new_model}"')
                     config_changed = True
 
+        if needs_v10 and self.config.pop('locale', None) is not None:
+            logging.info('[v10] Removed obsolete locale preference')
+
         # Stamp every version flag up to current so we never re-run on
         # subsequent startups, even if no fields actually needed changing
         # (e.g., a v8 user who'd already picked a custom non-deprecated model).
-        for n in range(8, CURRENT_CONFIG_VERSION + 1):
+        for n in range(8, CONFIG_VERSION + 1):
             self.config[f'is_config_file_updated_for_v{n}'] = True
 
         self.save_config(self.config)
@@ -756,7 +720,7 @@ class WritingToolApp(QtWidgets.QApplication):
         if self.tray_icon is None:
             return
         self.tray_icon.setIcon(self.ready_tray_icon)
-        self.tray_icon.setToolTip(self._('WritingTools — Ready to paste'))
+        self.tray_icon.setToolTip('WritingTools — Ready to paste')
         self.tray_ready_timer.start(5000)
 
     def restore_tray_icon(self):
@@ -802,8 +766,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
     def update_tray_menu(self):
         """
-        Update the tray menu with all menu items, including pause functionality
-        and proper translations.
+        Update the tray menu with all menu items, including pause functionality.
         """
         self.tray_menu.clear()
 
@@ -811,26 +774,26 @@ class WritingToolApp(QtWidgets.QApplication):
         self.apply_dark_mode_styles(self.tray_menu)
 
         # Settings menu item
-        settings_action = self.tray_menu.addAction(self._('Settings'))
+        settings_action = self.tray_menu.addAction('Settings')
         settings_action.triggered.connect(self.show_settings)
 
         # Pause/Resume toggle action 
-        self.toggle_action = self.tray_menu.addAction(self._('Resume') if self.paused else self._('Pause'))
+        self.toggle_action = self.tray_menu.addAction('Resume' if self.paused else 'Pause')
         self.toggle_action.triggered.connect(self.toggle_paused)
 
         # About menu item
-        about_action = self.tray_menu.addAction(self._('About'))
+        about_action = self.tray_menu.addAction('About')
         about_action.triggered.connect(self.show_about)
 
         # Exit menu item
-        exit_action = self.tray_menu.addAction(self._('Exit'))
+        exit_action = self.tray_menu.addAction('Exit')
         exit_action.triggered.connect(self.exit_app)
         
     def toggle_paused(self):
         """Toggle the paused state of the application."""
         logging.debug('Toggle paused state')
         self.paused = not self.paused
-        self.toggle_action.setText(self._('Resume') if self.paused else self._('Pause'))
+        self.toggle_action.setText('Resume' if self.paused else 'Pause')
         logging.debug('App is paused' if self.paused else 'App is resumed')
 
     @staticmethod
@@ -1003,7 +966,6 @@ class WritingToolApp(QtWidgets.QApplication):
         # Always create a new settings window to handle providers_only correctly
         self.settings_window = ui.SettingsWindow.SettingsWindow(self, providers_only=providers_only)
         self.settings_window.close_signal.connect(self.exit_app)
-        self.settings_window.retranslate_ui()
         self.settings_window.show()
 
 

@@ -828,11 +828,11 @@ class OptionPromptTests(unittest.TestCase):
         )
 
     def test_system_instruction_gives_additions_precedence(self):
-        instruction = self.build_system_instruction("Proofread", " Translate to French ")
+        instruction = self.build_system_instruction("Proofread", " Use a warmer tone ")
 
         self.assertTrue(instruction.startswith("Correct the text.\n\n"))
         self.assertIn("override the rules above", instruction)
-        self.assertTrue(instruction.endswith("\nTranslate to French"))
+        self.assertTrue(instruction.endswith("\nUse a warmer tone"))
 
     def test_custom_system_instruction_is_unchanged(self):
         self.assertEqual(

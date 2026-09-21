@@ -2,9 +2,9 @@ from aiprovider import AIProvider
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
 
+from app_paths import CONFIG_VERSION
 from ui.UIUtils import UIUtils, colorMode
 
-_ = lambda x: x
 
 class SettingsWindow(QtWidgets.QWidget):
     """
@@ -25,11 +25,6 @@ class SettingsWindow(QtWidgets.QWidget):
         self.autostart_checkbox = None
         self.shortcut_input = None
         self.init_ui()
-        self.retranslate_ui()
-
-
-    def retranslate_ui(self):
-        self.setWindowTitle(_("Settings"))
 
     def init_provider_ui(self, provider: AIProvider, layout):
         """
@@ -149,7 +144,7 @@ class SettingsWindow(QtWidgets.QWidget):
         Initialize the user interface for the settings window.
         Now includes a scroll area for better handling of content on smaller screens.
         """
-        self.setWindowTitle(_('Settings'))
+        self.setWindowTitle('Settings')
         # Set the exact width we want (592px) as both minimum and default
         self.setMinimumWidth(592)
         self.setFixedWidth(592)  # This makes the width non-resizable
@@ -203,12 +198,12 @@ class SettingsWindow(QtWidgets.QWidget):
         content_layout.setSpacing(20)
 
         if not self.providers_only:
-            title_label = QtWidgets.QLabel(_("Settings"))
+            title_label = QtWidgets.QLabel("Settings")
             title_label.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
             content_layout.addWidget(title_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
 
             # Add shortcut key input
-            shortcut_label = QtWidgets.QLabel(_("Shortcut Key:"))
+            shortcut_label = QtWidgets.QLabel("Shortcut Key:")
             shortcut_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
             content_layout.addWidget(shortcut_label)
 
@@ -223,13 +218,13 @@ class SettingsWindow(QtWidgets.QWidget):
             content_layout.addWidget(self.shortcut_input)
 
             # Add theme selection
-            theme_label = QtWidgets.QLabel(_("Background Theme:"))
+            theme_label = QtWidgets.QLabel("Background Theme:")
             theme_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
             content_layout.addWidget(theme_label)
 
             theme_layout = QHBoxLayout()
-            self.gradient_radio = QRadioButton(_("Blurry Gradient"))
-            self.plain_radio = QRadioButton(_("Plain"))
+            self.gradient_radio = QRadioButton("Blurry Gradient")
+            self.plain_radio = QRadioButton("Plain")
             self.gradient_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
             self.plain_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
             current_theme = self.app.config.get('theme', 'gradient')
@@ -240,7 +235,7 @@ class SettingsWindow(QtWidgets.QWidget):
             content_layout.addLayout(theme_layout)
 
         # Add provider selection
-        provider_label = QtWidgets.QLabel(_("Choose AI Provider:"))
+        provider_label = QtWidgets.QLabel("Choose AI Provider:")
         provider_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         content_layout.addWidget(provider_label)
 
@@ -297,7 +292,7 @@ class SettingsWindow(QtWidgets.QWidget):
         bottom_layout.setSpacing(10)
 
         # Add save button to bottom container
-        save_button = QtWidgets.QPushButton(_("Finish AI Setup") if self.providers_only else _("Save"))
+        save_button = QtWidgets.QPushButton("Finish AI Setup" if self.providers_only else "Save")
         save_button.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -329,12 +324,10 @@ class SettingsWindow(QtWidgets.QWidget):
         if not valid:
             QtWidgets.QMessageBox.warning(
                 self,
-                _("Provider setup incomplete"),
+                "Provider setup incomplete",
                 message,
             )
             return
-
-        self.app.config['locale'] = 'en'
 
         if not self.providers_only:
             self.app.config['shortcut'] = self.shortcut_input.text()
@@ -345,8 +338,9 @@ class SettingsWindow(QtWidgets.QWidget):
         self.app.config['streaming'] = False
         self.app.config['provider'] = self.provider_dropdown.currentText()
 
-        # Mark config as updated for v8 (new users start with this flag set)
-        self.app.config['is_config_file_updated_for_v8'] = True
+        # New users start on the current config schema.
+        for version in range(8, CONFIG_VERSION + 1):
+            self.app.config[f'is_config_file_updated_for_v{version}'] = True
 
         provider.save_config()
 

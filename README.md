@@ -198,7 +198,7 @@ Contributions to this Linux fork belong at
 
 **1. [momokrono](https://github.com/momokrono):**
 
-Added Linux support, switched to the pynput API to improve Windows stability. Added Ollama API support, the core logic for customisable buttons, and localization. Fixed misc. bugs and added graceful termination support by handling SIGINT signal.
+Added Linux support, switched to the pynput API to improve Windows stability. Added Ollama API support and the core logic for customisable buttons. Fixed misc. bugs and added graceful termination support by handling SIGINT signal.
 
 @momokrono has been incredibly kind and helpful, and I'm forever grateful to have him as a contributor. Not only has he provided extensive help with code, but he's also played a big role in managing GitHub issues. - Jesai
 

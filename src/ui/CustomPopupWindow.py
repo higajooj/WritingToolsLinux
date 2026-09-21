@@ -24,7 +24,6 @@ from options_store import (
 from platform_input import validate_trigger
 from ui.UIUtils import ThemeBackground, UIUtils, colorMode
 
-_ = lambda x: x
 
 class ButtonEditDialog(QDialog):
     """
@@ -86,7 +85,6 @@ class ButtonEditDialog(QDialog):
     - Make it funny.
     - Add emojis!
     - Roast this!
-    - Translate to English.
     - Make the text title case.
     - If it's all caps, make it all small, and vice-versa.
     - Write a reply to this.
@@ -483,7 +481,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         input_layout.setContentsMargins(0,0,0,0)
         
         self.custom_input = QLineEdit()
-        self.custom_input.setPlaceholderText(_("Describe your change..."))
+        self.custom_input.setPlaceholderText("Describe your change...")
         self.custom_input.setStyleSheet(f"""
             QLineEdit {{
                 padding: 8px;
@@ -1052,9 +1050,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
         # The highlighted button already names the action, so the placeholder
         # stays short enough not to clip "(optional)" in the narrow field.
         if option is None:
-            self.custom_input.setPlaceholderText(_("Describe your change..."))
+            self.custom_input.setPlaceholderText("Describe your change...")
         else:
-            self.custom_input.setPlaceholderText(_("Add instructions (optional)..."))
+            self.custom_input.setPlaceholderText("Add instructions (optional)...")
 
     def on_generic_instruction(self, instruction):
         if not self.edit_mode:

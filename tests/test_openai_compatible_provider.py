@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from aiprovider import OpenAICompatibleProvider
+from app_paths import CONFIG_VERSION
 from ui.SettingsWindow import SettingsWindow
 
 
@@ -216,6 +217,7 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
                 saved_provider = saved["providers"][self.provider.provider_name]
                 self.assertEqual(saved_provider["api_key"], "")
                 self.app.save_config.assert_called_with(self.app.config)
+                self.assertTrue(saved[f"is_config_file_updated_for_v{CONFIG_VERSION}"])
                 restarted_provider = OpenAICompatibleProvider(self.app)
                 restarted_provider.load_config(saved_provider)
                 self.assertEqual(restarted_provider.get_response("Proofread.", "Text."), "Corrected text.")

@@ -5,7 +5,6 @@ from PySide6.QtWidgets import QHBoxLayout, QRadioButton
 
 from ui.UIUtils import UIUtils, colorMode
 
-_ = lambda x: x
 
 class OnboardingWindow(QtWidgets.QWidget):
     # Closing signal
@@ -23,7 +22,7 @@ class OnboardingWindow(QtWidgets.QWidget):
 
     def init_ui(self):
         logging.debug('Initializing onboarding UI')
-        self.setWindowTitle(_('Welcome to Writing Tools'))
+        self.setWindowTitle('Welcome to Writing Tools')
         self.resize(600, 500)
 
         UIUtils.setup_window_and_layout(self)
@@ -39,22 +38,22 @@ class OnboardingWindow(QtWidgets.QWidget):
     def show_welcome_screen(self):
         UIUtils.clear_layout(self.content_layout)
 
-        title_label = QtWidgets.QLabel(_("Welcome to Writing Tools")+"!")
+        title_label = QtWidgets.QLabel("Welcome to Writing Tools!")
         title_label.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         self.content_layout.addWidget(title_label, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        features_text = f"""
-        • {_('Instantly optimize your writing with AI by selecting your text and invoking Writing Tools with "ctrl+space", anywhere.')} 
+        features_text = """
+        • Instantly optimize your writing with AI by selecting your text and invoking Writing Tools with "ctrl+space", anywhere.
 
-        • {_('Get a summary you can chat with of articles, YouTube videos, or documents by select all text with "ctrl+a"')}
-          {_('(or select the YouTube transcript from its description), invoking Writing Tools, and choosing Summary.')}
+        • Get a summary you can chat with of articles, YouTube videos, or documents by select all text with "ctrl+a"
+          (or select the YouTube transcript from its description), invoking Writing Tools, and choosing Summary.
 
-        • {_('Chat with AI anytime by invoking Writing Tools without selecting any text.')}
+        • Chat with AI anytime by invoking Writing Tools without selecting any text.
 
-        • {_('Supports an extensive range of AI models:')}
-            - {_('Gemini')}
-            - {_('ChatGPT subscription access through OpenAI Codex')}
-            - {_('ANY OpenAI Compatible API — including local LLMs!')}
+        • Supports an extensive range of AI models:
+            - Gemini
+            - ChatGPT subscription access through OpenAI Codex
+            - ANY OpenAI Compatible API — including local LLMs!
         """
         features_label = QtWidgets.QLabel(features_text)
         features_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
@@ -75,13 +74,13 @@ class OnboardingWindow(QtWidgets.QWidget):
         """)
         self.content_layout.addWidget(self.shortcut_input)
 
-        theme_label = QtWidgets.QLabel(_("Choose your theme:"))
+        theme_label = QtWidgets.QLabel("Choose your theme:")
         theme_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         self.content_layout.addWidget(theme_label)
 
         theme_layout = QHBoxLayout()
-        gradient_radio = QRadioButton(_("Gradient"))
-        plain_radio = QRadioButton(_("Plain"))
+        gradient_radio = QRadioButton("Gradient")
+        plain_radio = QRadioButton("Plain")
         gradient_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         plain_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         gradient_radio.setChecked(self.theme == 'gradient')
@@ -90,7 +89,7 @@ class OnboardingWindow(QtWidgets.QWidget):
         theme_layout.addWidget(plain_radio)
         self.content_layout.addLayout(theme_layout)
 
-        next_button = QtWidgets.QPushButton(_('Next'))
+        next_button = QtWidgets.QPushButton('Next')
         next_button.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
