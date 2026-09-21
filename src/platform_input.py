@@ -21,7 +21,7 @@ MODIFIER_NAMES = {
 
 
 def validate_trigger(trigger):
-    """Validate a shortcut before passing it to the portal."""
+    """Validate the modifier-plus-key syntax used by configured shortcuts."""
     parts = [part.strip() for part in (trigger or "").split("+")]
     if not parts or any(not part for part in parts):
         return False, "Separate keys with '+', for example ctrl+space."

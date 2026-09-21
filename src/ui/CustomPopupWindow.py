@@ -110,11 +110,9 @@ class ButtonEditDialog(QDialog):
         radio_layout.addWidget(self.window_radio)
         layout.addLayout(radio_layout)
 
-        # Direct hotkey (optional). Lets the user fire this button from
-        # anywhere without opening the popup first. Stored per-button in
-        # options.json under a "hotkey" key; absent = no hotkey, which is
-        # how every existing/legacy button starts.
-        hotkey_label = QLabel("Direct hotkey (optional):")
+        # Popup shortcut (optional). Stored per-button in options.json under
+        # a "hotkey" key; absent = no shortcut, preserving legacy configs.
+        hotkey_label = QLabel("Popup shortcut (optional):")
         hotkey_label.setStyleSheet(f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;")
         layout.addWidget(hotkey_label)
 
@@ -133,9 +131,9 @@ class ButtonEditDialog(QDialog):
         layout.addWidget(self.hotkey_input)
 
         hotkey_hint = QLabel(
-            "Press this combination from anywhere to run this button "
-            "directly, skipping the popup.\nUse '+' between keys, e.g. "
-            "ctrl+j or ctrl+shift+p."
+            "Open Writing Tools, then press this combination while its "
+            "popup is active to run this button immediately.\nUse '+' "
+            "between keys, e.g. ctrl+j or ctrl+shift+p."
         )
         hotkey_hint.setStyleSheet(
             f"color: {'#bbb' if colorMode == 'dark' else '#555'}; font-size: 12px;"
@@ -368,6 +366,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.input_area = None
         
         self.button_widgets = []
+        self.button_shortcuts = []
         self.drop_indicator_button = None
         self.drop_indicator_side = None
 
@@ -512,7 +511,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
         
         content_layout.addWidget(self.input_area)
 
-        self.build_buttons_list()
+        data = self.load_options()
+        self.build_buttons_list(data)
+        self._rebuild_button_shortcuts(data)
         self.rebuild_grid_layout(content_layout)
 
         logging.debug('CustomPopupWindow UI setup complete')
@@ -549,11 +550,11 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 new_widgets.append(b)
                 b.setIcon(UIUtils.themed_icon(v["icon"]))
 
-                # Tooltip surfaces the direct hotkey (if any) for discoverability.
-                # Buttons without a hotkey get no tooltip — keeps things uncluttered.
+                # Surface popup-local shortcuts without cluttering buttons that
+                # do not have one.
                 hotkey = (v.get("hotkey") or "").strip()
                 if hotkey:
-                    b.setToolTip(f"Direct hotkey: {hotkey}")
+                    b.setToolTip(f"Popup shortcut (while active): {hotkey}")
 
                 if not self.edit_mode:
                     b.clicked.connect(partial(self.on_generic_instruction, k))
@@ -576,6 +577,88 @@ class CustomPopupWindow(QtWidgets.QWidget):
         if self.edit_mode:
             for button in self.button_widgets:
                 self.add_edit_delete_icons(button)
+
+    @staticmethod
+    def _shortcut_sequence(trigger):
+        """Translate configured modifier aliases into a Qt key sequence."""
+        aliases = {
+            "ctrl": "Ctrl",
+            "control": "Ctrl",
+            "alt": "Alt",
+            "shift": "Shift",
+            "super": "Meta",
+            "meta": "Meta",
+            "win": "Meta",
+            "cmd": "Meta",
+        }
+        parts = [part.strip() for part in (trigger or "").split("+")]
+        translated = [aliases.get(part.lower(), part) for part in parts]
+        return QtGui.QKeySequence("+".join(translated))
+
+    @classmethod
+    def _shortcut_identity(cls, trigger):
+        return cls._shortcut_sequence(trigger).toString(
+            QtGui.QKeySequence.SequenceFormat.PortableText
+        ).lower()
+
+    def _clear_button_shortcuts(self):
+        for shortcut in self.button_shortcuts:
+            shortcut.setEnabled(False)
+            shortcut.deleteLater()
+        self.button_shortcuts = []
+
+    def _rebuild_button_shortcuts(self, data):
+        """Replace the popup-local bindings with those from ``data``."""
+        self._clear_button_shortcuts()
+        taken = {
+            self._shortcut_identity(
+                self.app.config.get("shortcut", "ctrl+space")
+            )
+        }
+
+        for button_name, button_data in (data or {}).items():
+            if button_name == "Custom":
+                continue
+            trigger = (button_data.get("hotkey") or "").strip()
+            if not trigger:
+                continue
+            ok, problem = validate_trigger(trigger)
+            identity = self._shortcut_identity(trigger)
+            if not ok or not identity:
+                logging.warning(
+                    'Ignoring invalid popup shortcut "%s" for "%s": %s',
+                    trigger,
+                    button_name,
+                    problem or "Qt could not parse the key sequence",
+                )
+                continue
+            if identity in taken:
+                logging.warning(
+                    'Ignoring duplicate popup shortcut "%s" for "%s"',
+                    trigger,
+                    button_name,
+                )
+                continue
+
+            shortcut = QtGui.QShortcut(self._shortcut_sequence(trigger), self)
+            shortcut.setContext(QtCore.Qt.ShortcutContext.WindowShortcut)
+            shortcut.setEnabled(not self.edit_mode)
+            shortcut.activated.connect(
+                partial(self._run_button_shortcut, button_name)
+            )
+            self.button_shortcuts.append(shortcut)
+            taken.add(identity)
+
+    def _set_button_shortcuts_enabled(self, enabled):
+        for shortcut in self.button_shortcuts:
+            shortcut.setEnabled(enabled)
+
+    def _run_button_shortcut(self, button_name):
+        """Immediately run a button only from the active normal popup."""
+        if self.edit_mode or not self.isVisible() or not self.isActiveWindow():
+            return
+        self.app.process_option(button_name)
+        self.close()
 
     def rebuild_grid_layout(self, parent_layout=None):
         """Rebuild grid layout with consistent sizing and proper Add New button placement."""
@@ -727,6 +810,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         """Toggle edit mode with improved button labels and state handling."""
         self.edit_mode = not self.edit_mode
         logging.debug(f'Edit mode toggled: {self.edit_mode}')
+        self._set_button_shortcuts_enabled(not self.edit_mode)
 
         if self.edit_mode:
             # Switch to edit mode:
@@ -842,7 +926,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         Check a button hotkey string for validity and conflicts.
 
         Returns (ok, error_message). Empty hotkey is always ok — the dialog
-        omits the field on save, which means "no direct hotkey for this
+        omits the field on save, which means "no popup shortcut for this
         button". This is also how every legacy/old options.json entry
         looks, so absence is always safe.
 
@@ -859,10 +943,11 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 f"Invalid shortcut: '{hotkey}'.\n\n{problem}"
             )
 
-        # Conflict with the global Writing Tools shortcut. Same combination
-        # can't dispatch to both the popup and a direct fire.
-        global_shortcut = (self.app.config.get('shortcut') or 'ctrl+space').strip().lower()
-        if hotkey == global_shortcut:
+        # The compositor may still dispatch the main shortcut while this
+        # popup is active, so do not bind the same combination locally.
+        hotkey_identity = self._shortcut_identity(hotkey)
+        global_shortcut = self.app.config.get('shortcut') or 'ctrl+space'
+        if hotkey_identity == self._shortcut_identity(global_shortcut):
             return False, (
                 f"'{hotkey}' is already used as the main Writing Tools "
                 f"hotkey (set in Settings). Pick a different combination."
@@ -873,8 +958,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
         for k, v in data.items():
             if k == exclude_button:
                 continue
-            other = (v.get('hotkey') or '').strip().lower()
-            if other and other == hotkey:
+            other = (v.get('hotkey') or '').strip()
+            if other and self._shortcut_identity(other) == hotkey_identity:
                 return False, (
                     f"'{hotkey}' is already used by the '{k}' button. "
                     f"Pick a different combination."
@@ -926,6 +1011,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.build_buttons_list(data)
             self.rebuild_grid_layout()
             self._fit_to_contents()
+        self._rebuild_button_shortcuts(data)
 
     def _commit_options(self, data, rebuild=True):
         """Persist and activate one editor change without closing the app."""

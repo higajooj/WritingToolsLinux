@@ -51,10 +51,15 @@ then returns to normal. Another result restarts the five-second indicator.
 Options configured to open in a pop-up window continue to show their response there.
 
 On desktops that handle shortcut assignment through the portal, configure the
-shortcut when prompted. Hyprland requires a binding in its own configuration.
-Writing Tools registers `com.writingtools.WritingTools:global` and
-`com.writingtools.WritingTools:button:<Name>` for each button hotkey and logs
-the required bindings at startup.
+main shortcut when prompted. Hyprland requires a binding in its own
+configuration. Writing Tools registers only
+`com.writingtools.WritingTools:global` and logs the required binding at
+startup.
+
+Custom button shortcuts are local to the Writing Tools popup. Open the popup
+with the main shortcut, then press a configured button shortcut while the
+popup is active to run that action immediately. These per-button shortcuts do
+not require portal registration or compositor bindings.
 
 For Hyprland's `hyprland.conf`, bind Super+P with:
 

@@ -76,6 +76,13 @@ class PopupOptionSelectionTests(unittest.TestCase):
     def button(self, key):
         return next(button for button in self.window.button_widgets if button.key == key)
 
+    def configure_shortcuts(self, **shortcuts):
+        options = copy.deepcopy(OPTIONS)
+        for button_name, trigger in shortcuts.items():
+            options[button_name]["hotkey"] = trigger
+        self.window._rebuild_button_shortcuts(options)
+        return options
+
     def test_focus_timer_does_not_outlive_the_popup(self):
         """A popup torn down before its focus timer fires must not touch the
         deleted QLineEdit.  PySide reports such a failure through sys.excepthook
@@ -91,6 +98,89 @@ class PopupOptionSelectionTests(unittest.TestCase):
             QTest.qWait(400)  # past the 250ms focus timer
 
         self.assertEqual(errors, [])
+
+    def test_popup_shortcut_runs_immediately_without_typed_instructions(self):
+        self.configure_shortcuts(Proofread="ctrl+j")
+        self.window.custom_input.setText("Ignore these instructions")
+        self.window.custom_input.setFocus()
+        self.window.activateWindow()
+        QtWidgets.QApplication.processEvents()
+
+        QTest.keyClick(
+            self.window.custom_input,
+            QtCore.Qt.Key_J,
+            QtCore.Qt.ControlModifier,
+        )
+
+        self.app.process_option.assert_called_once_with("Proofread")
+        self.assertFalse(self.window.isVisible())
+
+    def test_popup_shortcuts_are_window_scoped(self):
+        self.configure_shortcuts(Proofread="ctrl+j")
+        self.assertEqual(len(self.window.button_shortcuts), 1)
+        self.assertEqual(
+            self.window.button_shortcuts[0].context(),
+            QtCore.Qt.ShortcutContext.WindowShortcut,
+        )
+
+    def test_popup_shortcut_does_nothing_while_hidden(self):
+        self.configure_shortcuts(Proofread="ctrl+j")
+        self.window.hide()
+        self.window._run_button_shortcut("Proofread")
+
+        self.app.process_option.assert_not_called()
+
+    def test_popup_shortcut_does_nothing_while_window_is_inactive(self):
+        self.configure_shortcuts(Proofread="ctrl+j")
+        with patch.object(self.window, "isActiveWindow", return_value=False):
+            self.window._run_button_shortcut("Proofread")
+
+        self.app.process_option.assert_not_called()
+
+    def test_popup_shortcut_does_nothing_in_edit_mode(self):
+        self.configure_shortcuts(Proofread="ctrl+j")
+        self.window.toggle_edit_mode()
+
+        self.assertFalse(self.window.button_shortcuts[0].isEnabled())
+        self.window._run_button_shortcut("Proofread")
+        self.app.process_option.assert_not_called()
+
+    def test_live_options_replace_stale_shortcuts(self):
+        self.configure_shortcuts(Proofread="ctrl+j")
+        old_shortcuts = list(self.window.button_shortcuts)
+        updated = copy.deepcopy(OPTIONS)
+        updated["Proofread"]["hotkey"] = "ctrl+k"
+
+        self.window._activate_options(updated)
+
+        self.assertTrue(all(not shortcut.isEnabled() for shortcut in old_shortcuts))
+        self.assertEqual(len(self.window.button_shortcuts), 1)
+        self.assertEqual(
+            self.window.button_shortcuts[0].key().toString(),
+            "Ctrl+K",
+        )
+
+    def test_external_duplicate_shortcuts_bind_only_the_first_button(self):
+        updated = self.configure_shortcuts(Proofread="ctrl+j")
+        updated["Summary"]["hotkey"] = "control+j"
+
+        self.window._rebuild_button_shortcuts(updated)
+
+        self.assertEqual(len(self.window.button_shortcuts), 1)
+
+    def test_shortcut_validation_rejects_malformed_and_conflicting_values(self):
+        options = copy.deepcopy(OPTIONS)
+        options["Proofread"]["hotkey"] = "ctrl+j"
+        with patch.object(self.window, "load_options", return_value=options):
+            malformed, _ = self.window._validate_hotkey("ctrl")
+            duplicate, _ = self.window._validate_hotkey(
+                "control+j", exclude_button="Summary"
+            )
+        main_conflict, _ = self.window._validate_hotkey("control+space")
+
+        self.assertFalse(malformed)
+        self.assertFalse(duplicate)
+        self.assertFalse(main_conflict)
 
     def test_click_selects_option_without_dispatching_or_closing(self):
         self.button("Proofread").click()
@@ -713,73 +803,43 @@ class PopupOptionSelectionTests(unittest.TestCase):
 
 
 class _OptionsApplyHost:
-    _build_shortcut_map = WritingToolApp._build_shortcut_map
     apply_options = WritingToolApp.apply_options
+    start_hotkey_listener = WritingToolApp.start_hotkey_listener
 
     def __init__(self, options):
         self.config = {"shortcut": "ctrl+space"}
         self.options = options
         self.register_hotkey = Mock()
+        self.input_backend = Mock()
+        self.registered_hotkey = "old"
 
 
 class LiveOptionApplicationTests(unittest.TestCase):
-    def test_only_hotkey_definition_changes_refresh_portal_bindings(self):
+    def test_option_changes_never_refresh_portal_bindings(self):
         original = copy.deepcopy(OPTIONS)
         host = _OptionsApplyHost(original)
 
-        instruction_change = copy.deepcopy(original)
-        instruction_change["Proofread"]["instruction"] = "Use perfect grammar."
-        host.apply_options(instruction_change)
+        updated = copy.deepcopy(original)
+        updated["Proofread"]["hotkey"] = "ctrl+k"
+        host.apply_options(updated)
+
+        self.assertIs(host.options, updated)
         host.register_hotkey.assert_not_called()
 
-        reordered = {
-            "Summary": instruction_change["Summary"],
-            "Proofread": instruction_change["Proofread"],
-            "Custom": instruction_change["Custom"],
-        }
-        host.apply_options(reordered)
-        host.register_hotkey.assert_not_called()
-
-        with_hotkey = copy.deepcopy(reordered)
-        with_hotkey["Proofread"]["hotkey"] = "CTRL+J"
-        host.apply_options(with_hotkey)
-        host.register_hotkey.assert_called_once_with()
-
-        same_hotkey_new_prompt = copy.deepcopy(with_hotkey)
-        same_hotkey_new_prompt["Proofread"]["instruction"] = "Fix every typo."
-        host.apply_options(same_hotkey_new_prompt)
-        host.register_hotkey.assert_called_once_with()
-
-        renamed = copy.deepcopy(same_hotkey_new_prompt)
-        renamed["Polish"] = renamed.pop("Proofread")
-        host.apply_options(renamed)
-        self.assertEqual(host.register_hotkey.call_count, 2)
-
-    def test_refresh_follows_the_shortcuts_that_would_be_bound(self):
+    def test_portal_registration_contains_only_the_main_shortcut(self):
         options = copy.deepcopy(OPTIONS)
         options["Proofread"]["hotkey"] = "ctrl+j"
         host = _OptionsApplyHost(options)
 
-        def change(button, hotkey):
-            updated = copy.deepcopy(host.options)
-            updated[button]["hotkey"] = hotkey
-            host.apply_options(updated)
+        host.start_hotkey_listener()
 
-        # The portal keeps key case, so a case-only change must rebind.
-        change("Proofread", "ctrl+J")
-        self.assertEqual(host.register_hotkey.call_count, 1)
-
-        # Triggers that are skipped at registration bind nothing new.
-        change("Summary", "ctrl")
-        change("Summary", "shift")
-        change("Summary", "CTRL+SPACE")
-        change("Summary", "ctrl+J")
-        self.assertEqual(host.register_hotkey.call_count, 1)
-
-        # Freeing the conflicting trigger lets Summary's hotkey bind.
-        change("Proofread", "ctrl+k")
-        self.assertEqual(host.register_hotkey.call_count, 2)
-        self.assertIn("button:Summary", host._build_shortcut_map(host.options))
+        host.input_backend.set_callbacks.assert_called_once_with(
+            {"global": "global"}
+        )
+        host.input_backend.register.assert_called_once_with(
+            {"global": "ctrl+space"}
+        )
+        self.assertIsNone(host.registered_hotkey)
 
 
 class OptionPromptTests(unittest.TestCase):

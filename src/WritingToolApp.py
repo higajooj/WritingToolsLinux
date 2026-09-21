@@ -24,7 +24,7 @@ from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import QMessageBox
 from app_paths import CONFIG_VERSION, app_root, asset_root, options_path
 from options_store import load_options as load_options_file
-from platform_input import APP_ID, WaylandInputBackend, validate_trigger
+from platform_input import APP_ID, WaylandInputBackend
 
 class _SelectedTextHolder:
     """
@@ -295,58 +295,9 @@ class WritingToolApp(QtWidgets.QApplication):
         self.options = load_options_file()
         logging.debug('Options loaded successfully')
 
-    def _build_shortcut_map(self, options, log=False):
-        """
-        Return the shortcut ID -> trigger map to register with the portal.
-
-        Invalid or duplicate triggers are skipped. The first matching trigger
-        wins because the portal cannot dispatch it to two shortcut IDs.
-        """
-        global_shortcut = self.config.get('shortcut', 'ctrl+space')
-        shortcut_map = {'global': global_shortcut}
-        taken = {global_shortcut.strip().lower()}
-
-        # Custom actions need typed input and cannot run directly.
-        for button_name, button_cfg in (options or {}).items():
-            if button_name == 'Custom':
-                continue
-            trigger = (button_cfg.get('hotkey') or '').strip()
-            if not trigger:
-                continue
-            ok, problem = validate_trigger(trigger)
-            if not ok:
-                if log:
-                    logging.error(
-                        f'Invalid hotkey "{trigger}" for button "{button_name}": {problem}'
-                    )
-                continue
-            if trigger.lower() in taken:
-                if log:
-                    logging.warning(
-                        f'Hotkey "{trigger}" for button "{button_name}" '
-                        f'conflicts with an already-registered binding; skipping'
-                    )
-                continue
-            taken.add(trigger.lower())
-            shortcut_map['button:' + button_name] = trigger
-            if log:
-                logging.debug(f'Registering button hotkey: {trigger} -> {button_name}')
-        return shortcut_map
-
     def apply_options(self, options):
-        """Apply persisted button options to the running application.
-
-        Most edits only change prompts or presentation and need no portal
-        activity. Re-register only when the shortcuts that would be bound
-        changed, keeping ordinary button editing immediate and unobtrusive.
-        """
-        previous_shortcuts = self._build_shortcut_map(self.options)
+        """Apply persisted button options to the running application."""
         self.options = options
-        current_shortcuts = self._build_shortcut_map(self.options)
-
-        if previous_shortcuts != current_shortcuts:
-            logging.debug('Button hotkeys changed; refreshing portal shortcuts')
-            self.register_hotkey()
 
     def save_config(self, config):
         """
@@ -368,46 +319,20 @@ class WritingToolApp(QtWidgets.QApplication):
 
     def start_hotkey_listener(self):
         """
-        Register the global and direct button shortcuts with the portal.
+        Register only the main application shortcut with the portal.
+
+        Per-button shortcuts belong to the active popup window and are
+        handled by Qt, so they never require compositor configuration.
         """
         try:
-            shortcut_map = self._build_shortcut_map(self.options, log=True)
-            self.input_backend.set_callbacks({k: k for k in shortcut_map})
+            shortcut_map = {
+                'global': self.config.get('shortcut', 'ctrl+space'),
+            }
+            self.input_backend.set_callbacks({'global': 'global'})
             self.registered_hotkey = None
             self.input_backend.register(shortcut_map)
         except Exception as e:
             logging.error(f'Failed to register global shortcuts: {e}')
-
-    @Slot(str)
-    def _fire_button_directly(self, button_name):
-        """
-        Run a button's option without showing the popup — invoked by a
-        per-button direct hotkey. Mirrors the relevant parts of
-        `_show_popup`: set up the async clipboard capture, then hand off
-        to the worker thread (`process_option`) which waits on the holder
-        and dispatches the AI call.
-        """
-        logging.debug(f'Firing button "{button_name}" directly')
-
-        # If the popup is currently visible (e.g., user opened it then
-        # pressed a button hotkey), close it so it doesn't compete.
-        if self.popup_window is not None and self.popup_window.isVisible():
-            self.popup_window.close()
-
-        # Sanity check: button must still exist in options. Could be stale
-        # if options.json was edited externally between registration and
-        # fire — skip gracefully rather than crash.
-        if not self.options or button_name not in self.options:
-            logging.warning(f'Button "{button_name}" no longer exists; ignoring hotkey')
-            return
-
-        self.current_text_holder = _SelectedTextHolder()
-        self._capture_clipboard_async(self.current_text_holder)
-
-        # Same worker path as a popup-button click. process_option_thread
-        # waits on the holder, surfaces "Please select text…" if empty,
-        # and routes window-mode options through the response window.
-        self.process_option(button_name)
 
     @Slot(bool)
     def handle_backend_registration(self, registered):
@@ -424,10 +349,6 @@ class WritingToolApp(QtWidgets.QApplication):
             return
         if shortcut_id == 'global':
             self.on_hotkey_pressed()
-        elif shortcut_id.startswith('button:'):
-            if self.current_provider:
-                self.current_provider.cancel()
-            self._fire_button_directly(shortcut_id[7:])
 
     def register_hotkey(self):
         """
