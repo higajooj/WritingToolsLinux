@@ -385,9 +385,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         main_layout.setContentsMargins(0,0,0,0)
         
         self.background = ThemeBackground(
-            self, 
-            self.app.config.get('theme','gradient'),
-            is_popup=True,
+            self,
             border_radius=10
         )
         main_layout.addWidget(self.background)

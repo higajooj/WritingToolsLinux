@@ -9,7 +9,7 @@ APP_ID = "com.writingtools.WritingTools"
 
 # Current config.json schema version. Shared by the startup migration and by
 # the settings window, which stamps fresh configs as already current.
-CONFIG_VERSION = 10
+CONFIG_VERSION = 11
 
 
 def app_root():

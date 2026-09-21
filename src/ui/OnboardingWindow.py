@@ -1,7 +1,6 @@
 import logging
 
 from PySide6 import QtCore, QtWidgets
-from PySide6.QtWidgets import QHBoxLayout, QRadioButton
 
 from ui.UIUtils import UIUtils, colorMode
 
@@ -14,7 +13,6 @@ class OnboardingWindow(QtWidgets.QWidget):
         super().__init__()
         self.app = app
         self.shortcut = 'ctrl+space'
-        self.theme = 'gradient'
         self.content_layout = None
         self.shortcut_input = None
         self.init_ui()
@@ -74,21 +72,6 @@ class OnboardingWindow(QtWidgets.QWidget):
         """)
         self.content_layout.addWidget(self.shortcut_input)
 
-        theme_label = QtWidgets.QLabel("Choose your theme:")
-        theme_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
-        self.content_layout.addWidget(theme_label)
-
-        theme_layout = QHBoxLayout()
-        gradient_radio = QRadioButton("Gradient")
-        plain_radio = QRadioButton("Plain")
-        gradient_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
-        plain_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
-        gradient_radio.setChecked(self.theme == 'gradient')
-        plain_radio.setChecked(self.theme == 'plain')
-        theme_layout.addWidget(gradient_radio)
-        theme_layout.addWidget(plain_radio)
-        self.content_layout.addLayout(theme_layout)
-
         next_button = QtWidgets.QPushButton('Next')
         next_button.setStyleSheet("""
             QPushButton {
@@ -103,17 +86,13 @@ class OnboardingWindow(QtWidgets.QWidget):
                 background-color: #45a049;
             }
         """)
-        next_button.clicked.connect(lambda: self.on_next_clicked(gradient_radio.isChecked()))
+        next_button.clicked.connect(self.on_next_clicked)
         self.content_layout.addWidget(next_button)
 
-    def on_next_clicked(self, is_gradient):
+    def on_next_clicked(self):
         self.shortcut = self.shortcut_input.text()
-        self.theme = 'gradient' if is_gradient else 'plain'
-        logging.debug(f'User selected shortcut: {self.shortcut}, theme: {self.theme}')
-        self.app.config = {
-            'shortcut': self.shortcut,
-            'theme': self.theme
-        }
+        logging.debug(f'User selected shortcut: {self.shortcut}')
+        self.app.config = {'shortcut': self.shortcut}
         self.show_api_key_input()
 
     def show_api_key_input(self):

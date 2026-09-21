@@ -1,6 +1,6 @@
 from aiprovider import AIProvider
 from PySide6 import QtCore, QtWidgets
-from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
+from PySide6.QtWidgets import QScrollArea
 
 from app_paths import CONFIG_VERSION
 from ui.UIUtils import UIUtils, colorMode
@@ -18,8 +18,6 @@ class SettingsWindow(QtWidgets.QWidget):
         self.app = app
         self.current_provider_layout = None
         self.providers_only = providers_only
-        self.gradient_radio = None
-        self.plain_radio = None
         self.provider_dropdown = None
         self.provider_container = None
         self.autostart_checkbox = None
@@ -217,23 +215,6 @@ class SettingsWindow(QtWidgets.QWidget):
             """)
             content_layout.addWidget(self.shortcut_input)
 
-            # Add theme selection
-            theme_label = QtWidgets.QLabel("Background Theme:")
-            theme_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
-            content_layout.addWidget(theme_label)
-
-            theme_layout = QHBoxLayout()
-            self.gradient_radio = QRadioButton("Blurry Gradient")
-            self.plain_radio = QRadioButton("Plain")
-            self.gradient_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
-            self.plain_radio.setStyleSheet(f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
-            current_theme = self.app.config.get('theme', 'gradient')
-            self.gradient_radio.setChecked(current_theme == 'gradient')
-            self.plain_radio.setChecked(current_theme == 'plain')
-            theme_layout.addWidget(self.gradient_radio)
-            theme_layout.addWidget(self.plain_radio)
-            content_layout.addLayout(theme_layout)
-
         # Add provider selection
         provider_label = QtWidgets.QLabel("Choose AI Provider:")
         provider_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
@@ -331,7 +312,6 @@ class SettingsWindow(QtWidgets.QWidget):
 
         if not self.providers_only:
             self.app.config['shortcut'] = self.shortcut_input.text()
-            self.app.config['theme'] = 'gradient' if self.gradient_radio.isChecked() else 'plain'
         else:
             self.app.create_tray_icon()
 

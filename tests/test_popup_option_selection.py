@@ -52,7 +52,7 @@ class PopupOptionSelectionTests(unittest.TestCase):
 
     def setUp(self):
         self.app = SimpleNamespace(
-            config={"theme": "plain"},
+            config={},
             process_option=Mock(),
             apply_options=Mock(),
             exit_app=Mock(),

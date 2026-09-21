@@ -33,12 +33,10 @@ class ConfigMigrationTests(unittest.TestCase):
             "is_config_file_updated_for_v8": True,
             "is_config_file_updated_for_v9": True,
             "locale": "it",
-            "theme": "plain",
         }
         app, message_box, exit_ = self.migrate(config)
 
         self.assertNotIn("locale", app.config)
-        self.assertEqual(app.config["theme"], "plain")
         self.assertLessEqual(current_flags().items(), app.config.items())
         app.save_config.assert_called_once_with(app.config)
         message_box.information.assert_not_called()
@@ -55,8 +53,27 @@ class ConfigMigrationTests(unittest.TestCase):
         app.save_config.assert_called_once_with(app.config)
         exit_.assert_not_called()
 
+    def test_v11_removes_theme_without_restart(self):
+        config = {
+            **{f"is_config_file_updated_for_v{n}": True for n in range(8, 11)},
+            "theme": "gradient",
+            "shortcut": "ctrl+space",
+        }
+        app, message_box, exit_ = self.migrate(config)
+
+        self.assertNotIn("theme", app.config)
+        self.assertEqual(app.config["shortcut"], "ctrl+space")
+        self.assertLessEqual(current_flags().items(), app.config.items())
+        app.save_config.assert_called_once_with(app.config)
+        message_box.information.assert_not_called()
+        exit_.assert_not_called()
+
+        migrated_again, _, second_exit = self.migrate(app.config)
+        migrated_again.save_config.assert_not_called()
+        second_exit.assert_not_called()
+
     def test_current_config_is_left_alone(self):
-        app, _, exit_ = self.migrate(current_flags() | {"theme": "plain"})
+        app, _, exit_ = self.migrate(current_flags() | {"shortcut": "ctrl+space"})
 
         app.save_config.assert_not_called()
         exit_.assert_not_called()

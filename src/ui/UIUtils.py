@@ -120,47 +120,22 @@ class UIUtils:
         if os.path.exists(icon_path): base.setWindowIcon(QtGui.QIcon(icon_path))
         main_layout = QtWidgets.QVBoxLayout(base)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        base.background = ThemeBackground(base, 'gradient')
+        base.background = ThemeBackground(base)
         main_layout.addWidget(base.background)
 
 
 class ThemeBackground(QtWidgets.QWidget):
-    """
-    A custom widget that creates a background for the application based on the selected theme.
-    """
-    def __init__(self, parent=None, theme='gradient', is_popup=False, border_radius=0):
+    """Paint the application's solid light- or dark-mode background."""
+
+    def __init__(self, parent=None, border_radius=0):
         super().__init__(parent)
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
-        self.theme = theme
-        self.is_popup = is_popup
         self.border_radius = border_radius
 
     def paintEvent(self, event):
-        """
-        Override the paint event to draw the background based on the selected theme.
-        """
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform, True)
-        if self.theme == 'gradient':
-            if self.is_popup:
-                background_image = QtGui.QPixmap(os.path.join(asset_root(), 'background_popup_dark.png' if colorMode == 'dark' else 'background_popup.png'))
-            else:
-                background_image = QtGui.QPixmap(os.path.join(asset_root(), 'background_dark.png' if colorMode == 'dark' else 'background.png'))
-            # Adds a path/border using which the border radius would be drawn
-            path = QtGui.QPainterPath()
-            path.addRoundedRect(0, 0, self.width(), self.height(), self.border_radius, self.border_radius)
-            painter.setClipPath(path)
-
-            painter.drawPixmap(self.rect(), background_image)
-        else:
-            if colorMode == 'dark':
-                color = QtGui.QColor(35, 35, 35)  # Dark mode color
-            else:
-                color = QtGui.QColor(222, 222, 222)  # Light mode color
-            brush = QtGui.QBrush(color)
-            painter.setBrush(brush)
-            pen = QtGui.QPen(QtGui.QColor(0, 0, 0, 0))
-            pen.setWidth(0)
-            painter.setPen(pen)
-            painter.drawRoundedRect(QtCore.QRect(0, 0, self.width(), self.height()), self.border_radius, self.border_radius)
+        color = QtGui.QColor(35, 35, 35) if colorMode == 'dark' else QtGui.QColor(222, 222, 222)
+        painter.setBrush(color)
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(self.rect(), self.border_radius, self.border_radius)

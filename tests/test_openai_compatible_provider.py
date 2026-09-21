@@ -228,7 +228,6 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
         self.app.config = {
             "provider": self.provider.provider_name,
             "shortcut": "ctrl+space",
-            "theme": "gradient",
             "providers": {self.provider.provider_name: self.config | {"api_key": ""}},
         }
         window = SettingsWindow(self.app, providers_only=False)
@@ -236,13 +235,13 @@ class OpenAICompatibleProviderTests(unittest.TestCase):
 
         label_text = " ".join(label.text() for label in window.findChildren(QLabel))
         self.assertNotIn("restart Writing Tools", label_text)
+        self.assertNotIn("Background Theme", label_text)
 
         window.shortcut_input.setText("ctrl+shift+space")
-        window.plain_radio.setChecked(True)
         window.save_settings()
 
         self.assertEqual(self.app.config["shortcut"], "ctrl+shift+space")
-        self.assertEqual(self.app.config["theme"], "plain")
+        self.assertNotIn("theme", self.app.config)
         self.assertIs(self.app.current_provider, self.provider)
         self.app.register_hotkey.assert_called_once_with()
 

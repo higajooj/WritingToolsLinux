@@ -117,7 +117,7 @@ for window criteria and rules. Other compositors need their own equivalent.
 - Proofread, rewrite, adjust tone, or apply a custom change to copied text.
 - Summaries, key points, and tables in a response window with Markdown rendering.
 - Custom buttons and shortcuts in `options.json`.
-- Light/dark appearance and gradient/plain themes.
+- Automatic light/dark appearance with simple solid backgrounds.
 - Local models through Ollama or an OpenAI-compatible server.
 - Browser-based ChatGPT subscription sign-in through the official Codex CLI.
 

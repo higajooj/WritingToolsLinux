@@ -152,7 +152,7 @@ class WritingToolApp(QtWidgets.QApplication):
     def _migrate_config(self):
         """
         One-shot config migration. Catches any user up to the current schema
-        (v10) regardless of where they started — v7, v8, or already current —
+        (v11) regardless of where they started — v7, v8, or already current —
         in a single pass with at most one restart.
 
         Each version is gated on its own `is_config_file_updated_for_v{N}`
@@ -181,6 +181,10 @@ class WritingToolApp(QtWidgets.QApplication):
         v10 (introduced 2026):
           • Remove the obsolete locale preference now that the application
             ships its English UI text directly in code.
+
+        v11 (introduced 2026):
+          • Remove the obsolete background theme preference now that all
+            windows use automatic solid light/dark backgrounds.
         """
         # Default for new installs and migrating users.
         NEW_DEFAULT_MODEL = 'gemini-flash-latest'
@@ -202,14 +206,16 @@ class WritingToolApp(QtWidgets.QApplication):
         needs_v8 = not self.config.get('is_config_file_updated_for_v8', False)
         needs_v9 = not self.config.get('is_config_file_updated_for_v9', False)
         needs_v10 = not self.config.get('is_config_file_updated_for_v10', False)
+        needs_v11 = not self.config.get('is_config_file_updated_for_v11', False)
 
-        if not needs_v8 and not needs_v9 and not needs_v10:
+        if not needs_v8 and not needs_v9 and not needs_v10 and not needs_v11:
             logging.debug('Config already up-to-date, no migration needed')
             return
 
         logging.info(
             'Running config migration '
-            f'(needs_v8={needs_v8}, needs_v9={needs_v9}, needs_v10={needs_v10})...'
+            f'(needs_v8={needs_v8}, needs_v9={needs_v9}, needs_v10={needs_v10}, '
+            f'needs_v11={needs_v11})...'
         )
 
         config_changed = False
@@ -254,6 +260,9 @@ class WritingToolApp(QtWidgets.QApplication):
 
         if needs_v10 and self.config.pop('locale', None) is not None:
             logging.info('[v10] Removed obsolete locale preference')
+
+        if needs_v11 and self.config.pop('theme', None) is not None:
+            logging.info('[v11] Removed obsolete background theme preference')
 
         # Stamp every version flag up to current so we never re-run on
         # subsequent startups, even if no fields actually needed changing
