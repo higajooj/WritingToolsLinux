@@ -228,6 +228,41 @@ class ChatContentScrollArea(QScrollArea):
         text_display.setMinimumHeight(int(doc_size.height() + 16))
         
         msg_layout.addWidget(text_display)
+
+        if not is_user:
+            copy_row = QtWidgets.QHBoxLayout()
+            copy_row.setContentsMargins(0, 2, 2, 0)
+            copy_row.addStretch()
+
+            copy_button = QtWidgets.QPushButton()
+            copy_button.setObjectName("copyResponseButton")
+            copy_button.setIcon(UIUtils.themed_icon("copy"))
+            copy_button.setToolTip("Copy response")
+            copy_button.setAccessibleName("Copy response")
+            copy_button.setFixedSize(28, 28)
+            copy_button.setIconSize(QtCore.QSize(16, 16))
+            copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            copy_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    border: none;
+                    border-radius: 5px;
+                    padding: 4px;
+                }}
+                QPushButton:hover {{
+                    background-color: {'#444' if colorMode == 'dark' else '#d0d0d0'};
+                }}
+                QPushButton:pressed {{
+                    background-color: {'#555' if colorMode == 'dark' else '#c0c0c0'};
+                }}
+            """)
+            copy_button.clicked.connect(
+                lambda _checked=False, response_text=text: (
+                    QtWidgets.QApplication.clipboard().setText(response_text)
+                )
+            )
+            copy_row.addWidget(copy_button)
+            msg_layout.addLayout(copy_row)
         
         self.layout.addWidget(msg_container)
         self.layout.addStretch()
@@ -375,19 +410,6 @@ class ResponseWindow(QtWidgets.QWidget):
             
         content_layout.addLayout(top_bar)
 
-        # Copy controls with matching text size
-        copy_bar = QtWidgets.QHBoxLayout()
-        copy_hint = QtWidgets.QLabel("Select to copy with formatting")
-        copy_hint.setStyleSheet(f"color: {'#aaaaaa' if colorMode == 'dark' else '#666666'}; font-size: 14px;")
-        copy_bar.addWidget(copy_hint)
-        copy_bar.addStretch()
-        
-        copy_md_btn = QtWidgets.QPushButton("Copy as Markdown")
-        copy_md_btn.setStyleSheet(self.get_button_style())
-        copy_md_btn.clicked.connect(self.copy_first_response)  # Updated to only copy first response
-        copy_bar.addWidget(copy_md_btn)
-        content_layout.addLayout(copy_bar)
-
         # Loading indicator
         loading_container = QtWidgets.QWidget()
         loading_layout = QtWidgets.QHBoxLayout(loading_container)
@@ -463,30 +485,6 @@ class ResponseWindow(QtWidgets.QWidget):
         bottom_bar.addWidget(send_button)
         
         content_layout.addLayout(bottom_bar)
-
-    # Method to get first response text
-    def get_first_response_text(self):
-        """Get the first model response text from chat history"""
-        try:
-            # Check chat history exists
-            if not self.chat_history:
-                return None
-                
-            # Find first assistant message
-            for msg in self.chat_history:
-                if msg["role"] == "assistant":
-                    return msg["content"]
-                    
-            return None
-        except Exception as e:
-            logging.error(f"Error getting first response: {e}")
-            return None
-
-    def copy_first_response(self):
-        """Copy only the first model response as Markdown"""
-        response_text = self.get_first_response_text()
-        if response_text:
-            QtWidgets.QApplication.clipboard().setText(response_text)
 
     def get_button_style(self):
         return f"""
@@ -711,17 +709,6 @@ class ResponseWindow(QtWidgets.QWidget):
         self.chat_history.append({"role": "user", "content": message})
         self.start_thinking_animation()
         self.app.process_followup_question(self, message)
-        
-    def copy_as_markdown(self):
-        """Copy conversation as Markdown"""
-        markdown = ""
-        for msg in self.chat_history:
-            if msg["role"] == "user":
-                markdown += f"**User**: {msg['content']}\n\n"
-            else:
-                markdown += f"**Assistant**: {msg['content']}\n\n"
-                
-        QtWidgets.QApplication.clipboard().setText(markdown)
         
     def closeEvent(self, event):
         """Handle window close event"""
