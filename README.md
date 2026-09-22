@@ -146,6 +146,15 @@ with ChatGPT**. Writing Tools opens the browser for authentication and loads
 the models available to that account. The default **Automatic** model follows
 the Codex default; you can also choose a model from the account dynamically.
 
+The **Thinking level** selector is model-aware. **Automatic (model default)**
+uses the reasoning effort recommended by Codex for the selected model. Choosing
+an explicit level overrides that default for writing actions and follow-up chat.
+The available levels come from the selected model's Codex metadata; when the
+model is **Automatic**, Writing Tools uses the model marked as the Codex default.
+Changing to a model that does not support the saved level resets the selector to
+**Automatic**. Older Codex versions that do not advertise reasoning levels show
+only the Automatic choice.
+
 Writing Tools uses its own Codex data directory, so signing in or out here does
 not change the account used by your normal Codex CLI sessions. Authentication
 is managed by Codex and is not stored in `config.json`. See OpenAI's official

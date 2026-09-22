@@ -184,6 +184,7 @@ class CodexAppServerClient:
         base_instructions: str,
         developer_instructions: str,
         input_text: str,
+        reasoning_effort: str | None = None,
         service_tier: str | None = None,
         on_started: Callable[[str, str], None] | None = None,
     ) -> str:
@@ -200,6 +201,10 @@ class CodexAppServerClient:
         }
         if model:
             thread_params["model"] = model
+        if reasoning_effort:
+            thread_params["config"] = {
+                "model_reasoning_effort": reasoning_effort,
+            }
 
         thread_result = self._request_started("thread/start", thread_params)
         try:

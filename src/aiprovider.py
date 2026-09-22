@@ -710,12 +710,13 @@ class _CodexProviderSignals(QtCore.QObject):
 
 
 class _CodexSettingsWidget(QtWidgets.QWidget):
-    """Account and model controls for the ChatGPT subscription provider."""
+    """Account, model, and request controls for the ChatGPT subscription provider."""
 
     def __init__(self, provider):
         super().__init__()
         self.provider = provider
         self.models_by_id = {}
+        self.models_authoritative = False
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -782,6 +783,30 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
         self.model_warning.hide()
         layout.addWidget(self.model_warning)
 
+        reasoning_layout = QtWidgets.QHBoxLayout()
+        reasoning_label = QtWidgets.QLabel("Thinking level")
+        reasoning_label.setStyleSheet(
+            f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+        )
+        self.reasoning_dropdown = QtWidgets.QComboBox()
+        self.reasoning_dropdown.setStyleSheet(f"""
+            font-size: 16px;
+            padding: 5px;
+            background-color: {'#444' if colorMode == 'dark' else 'white'};
+            color: {'#ffffff' if colorMode == 'dark' else '#000000'};
+            border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+        """)
+        self.reasoning_dropdown.addItem("Automatic (model default)", "")
+        reasoning_layout.addWidget(reasoning_label)
+        reasoning_layout.addWidget(self.reasoning_dropdown)
+        layout.addLayout(reasoning_layout)
+
+        self.reasoning_warning = QtWidgets.QLabel()
+        self.reasoning_warning.setWordWrap(True)
+        self.reasoning_warning.setStyleSheet("font-size: 13px; color: #d97706;")
+        self.reasoning_warning.hide()
+        layout.addWidget(self.reasoning_warning)
+
         self.speed_setting = ServiceTierSetting(
             "Fast uses more ChatGPT credits and depends on model and account availability."
         )
@@ -803,6 +828,7 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
             lambda: webbrowser.open("https://learn.chatgpt.com/docs/codex/cli")
         )
         self.model_dropdown.currentIndexChanged.connect(self._model_selected)
+        self.reasoning_dropdown.currentIndexChanged.connect(self._reasoning_selected)
         self.provider.signals.status_changed.connect(self.apply_status)
         self.provider.signals.models_changed.connect(self.apply_models)
 
@@ -817,10 +843,86 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
     def selected_service_tier(self):
         return self.speed_setting.get_value()
 
+    def selected_reasoning_effort(self):
+        if not self.models_authoritative:
+            return self.provider.reasoning_effort
+        return self.reasoning_dropdown.currentData() or ""
+
     @QtCore.Slot()
     def _model_selected(self):
+        reasoning_effort = self.selected_reasoning_effort()
         self.provider.model = self.selected_model()
+        self._refresh_reasoning_options(reasoning_effort)
         self._update_speed_availability()
+
+    @QtCore.Slot()
+    def _reasoning_selected(self):
+        self.provider.reasoning_effort = self.selected_reasoning_effort()
+        self.reasoning_warning.hide()
+
+    def _selected_model_metadata(self):
+        model_id = self.selected_model()
+        if model_id:
+            return self.models_by_id.get(model_id)
+        return next(
+            (model for model in self.models_by_id.values() if model.get("isDefault")),
+            None,
+        )
+
+    @staticmethod
+    def _reasoning_label(effort):
+        labels = {"none": "Off", "xhigh": "Extra high", "max": "Maximum"}
+        return labels.get(effort, effort.replace("_", " ").title())
+
+    def _refresh_reasoning_options(self, requested_effort=None, authoritative=True):
+        requested_effort = requested_effort or ""
+        model = self._selected_model_metadata()
+        options = (model or {}).get("supportedReasoningEfforts") or []
+        default_effort = (model or {}).get("defaultReasoningEffort") or ""
+
+        self.reasoning_dropdown.blockSignals(True)
+        self.reasoning_dropdown.clear()
+        self.reasoning_dropdown.addItem("Automatic (model default)", "")
+        if default_effort:
+            self.reasoning_dropdown.setItemData(
+                0,
+                f"Uses the model default: {self._reasoning_label(default_effort)}.",
+                QtCore.Qt.ItemDataRole.ToolTipRole,
+            )
+
+        available = set()
+        for option in options:
+            effort = option.get("reasoningEffort")
+            if not isinstance(effort, str) or not effort or effort in available:
+                continue
+            available.add(effort)
+            self.reasoning_dropdown.addItem(self._reasoning_label(effort), effort)
+            description = option.get("description")
+            if description:
+                self.reasoning_dropdown.setItemData(
+                    self.reasoning_dropdown.count() - 1,
+                    description,
+                    QtCore.Qt.ItemDataRole.ToolTipRole,
+                )
+
+        index = self.reasoning_dropdown.findData(requested_effort)
+        unsupported = bool(authoritative and requested_effort and index == -1)
+        self.reasoning_dropdown.setCurrentIndex(index if index >= 0 else 0)
+        self.reasoning_dropdown.blockSignals(False)
+
+        if unsupported:
+            self.provider.reasoning_effort = ""
+            self.reasoning_warning.setText(
+                f'The thinking level "{self._reasoning_label(requested_effort)}" is not '
+                "supported by the selected model. Automatic will be used."
+            )
+            self.reasoning_warning.show()
+        else:
+            self.reasoning_warning.hide()
+
+        self.reasoning_dropdown.setEnabled(
+            self.provider.auth_state == "signed_in" and bool(available)
+        )
 
     def _supports_fast(self, model_id):
         """Whether the model advertises the Fast (priority) service tier.
@@ -861,11 +963,13 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
         self.logout_button.setVisible(signed_in)
         self.install_button.setVisible(missing or state == "unsupported")
         self.model_dropdown.setEnabled(signed_in)
+        self.reasoning_dropdown.setEnabled(signed_in and self.reasoning_dropdown.count() > 1)
 
     @QtCore.Slot(object)
     def apply_models(self, payload):
         models = payload.get("models") or []
         authoritative = payload.get("authoritative", True)
+        self.models_authoritative = authoritative
         configured_model = self.provider.model or ""
         self.models_by_id = {}
         self.model_dropdown.blockSignals(True)
@@ -895,8 +999,12 @@ class _CodexSettingsWidget(QtWidgets.QWidget):
         else:
             self.model_warning.hide()
 
-        # setCurrentIndex above runs with signals blocked, so the speed state
-        # has to be refreshed by hand once the selection has settled.
+        # setCurrentIndex above runs with signals blocked, so dependent controls
+        # have to be refreshed by hand once the selection has settled.
+        self._refresh_reasoning_options(
+            self.provider.reasoning_effort,
+            authoritative=authoritative,
+        )
         self._update_speed_availability()
 
 
@@ -926,6 +1034,7 @@ class OpenAISubscriptionProvider(AIProvider):
         self.close_requested = False
         self.client = client or CodexAppServerClient(codex_data_root())
         self.model = ""
+        self.reasoning_effort = ""
         self.service_tier = "default"
         self.models = []
         self.account = None
@@ -958,20 +1067,28 @@ class OpenAISubscriptionProvider(AIProvider):
 
     def load_config(self, config: dict):
         self.model = (config.get("model") or "").strip()
+        self.reasoning_effort = self._normalize_reasoning_effort(
+            config.get("reasoning_effort")
+        )
         self.service_tier = ServiceTierSetting.normalize(config.get("service_tier"))
 
     def save_config(self):
         if self.settings_widget is not None:
             self.model = self.settings_widget.selected_model()
+            self.reasoning_effort = self.settings_widget.selected_reasoning_effort()
             self.service_tier = self.settings_widget.selected_service_tier()
         self.app.config.setdefault("providers", {})[self.provider_name] = {
             "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
             "service_tier": self.service_tier,
         }
         self.app.save_config(self.app.config)
 
     def render_settings(self, layout: QVBoxLayout, config: dict):
         self.model = (config.get("model") or self.model or "").strip()
+        self.reasoning_effort = self._normalize_reasoning_effort(
+            config.get("reasoning_effort", self.reasoning_effort)
+        )
         self.service_tier = ServiceTierSetting.normalize(config.get("service_tier", self.service_tier))
         self._settings_widget_token += 1
         token = self._settings_widget_token
@@ -985,6 +1102,10 @@ class OpenAISubscriptionProvider(AIProvider):
     def _forget_settings_widget(self, token):
         if token == self._settings_widget_token:
             self.settings_widget = None
+
+    @staticmethod
+    def _normalize_reasoning_effort(value):
+        return value.strip() if isinstance(value, str) else ""
 
     def validate_settings(self) -> tuple[bool, str]:
         if not self.client.is_available():
@@ -1139,6 +1260,7 @@ class OpenAISubscriptionProvider(AIProvider):
         try:
             self._ensure_authenticated()
             model = self._resolve_model()
+            reasoning_effort = self._resolve_reasoning_effort(model)
             developer_instructions, input_text = self._prepare_input(
                 system_instruction, prompt
             )
@@ -1153,6 +1275,7 @@ class OpenAISubscriptionProvider(AIProvider):
                 base_instructions=self.BASE_INSTRUCTIONS,
                 developer_instructions=developer_instructions,
                 input_text=input_text,
+                reasoning_effort=reasoning_effort,
                 service_tier=self.service_tier,
                 on_started=turn_started,
             )
@@ -1299,6 +1422,43 @@ class OpenAISubscriptionProvider(AIProvider):
             self.model = ""
             return ""
         return self.model
+
+    def _resolve_reasoning_effort(self, model_id):
+        if not self.reasoning_effort:
+            return None
+        if not self.models:
+            # The thinking level is optional, so a failed lookup must not
+            # block a turn that would otherwise run with the model default.
+            try:
+                self._refresh_models()
+            except CodexAppServerError as exc:
+                logging.warning("Could not list Codex models; using default thinking level: %s", exc)
+                return None
+
+        if model_id:
+            model = next(
+                (
+                    entry for entry in self.models
+                    if (entry.get("model") or entry.get("id")) == model_id
+                ),
+                None,
+            )
+        else:
+            model = next((entry for entry in self.models if entry.get("isDefault")), None)
+
+        supported = {
+            option.get("reasoningEffort")
+            for option in ((model or {}).get("supportedReasoningEfforts") or [])
+        }
+        if self.reasoning_effort not in supported:
+            logging.warning(
+                'Saved thinking level "%s" is unavailable for model "%s"; using default',
+                self.reasoning_effort,
+                model_id or "Automatic",
+            )
+            self.reasoning_effort = ""
+            return None
+        return self.reasoning_effort
 
     def _prepare_input(self, system_instruction, prompt):
         trusted_instructions = [self.PROVIDER_INSTRUCTIONS]

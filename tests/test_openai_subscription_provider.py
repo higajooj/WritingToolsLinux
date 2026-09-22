@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication, QVBoxLayout
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from aiprovider import OpenAISubscriptionProvider, _CodexSettingsWidget
-from codex_app_server import CodexTurnError
+from codex_app_server import CodexAppServerError, CodexTurnError
 from ui.SettingsWindow import SettingsWindow
 
 
@@ -28,7 +28,18 @@ class _FakeCodexClient:
         self.available = available
         self.account = None
         self.models_pages = [[
-            {"model": "gpt-first", "displayName": "GPT First", "hidden": False},
+            {
+                "model": "gpt-first",
+                "displayName": "GPT First",
+                "hidden": False,
+                "isDefault": True,
+                "defaultReasoningEffort": "medium",
+                "supportedReasoningEfforts": [
+                    {"reasoningEffort": "low", "description": "Faster"},
+                    {"reasoningEffort": "medium", "description": "Balanced"},
+                    {"reasoningEffort": "high", "description": "Deeper"},
+                ],
+            },
             {"model": "hidden", "displayName": "Hidden", "hidden": True},
         ]]
         # "repeat" hands back a cursor that never advances; "unique" always
@@ -188,6 +199,7 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
         self.assertEqual(result, "Edited response")
         turn = self.client.turns[0]
         self.assertEqual(turn["model"], "gpt-first")
+        self.assertIsNone(turn["reasoning_effort"])
         self.assertEqual(turn["service_tier"], "default")
         self.assertIn("Use plain English.", turn["developer_instructions"])
         self.assertIn("Keep it concise.", turn["developer_instructions"])
@@ -195,8 +207,9 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
         self.assertEqual(history, messages[1:])
         self.app.output_ready_signal.emit.assert_not_called()
 
-    def test_only_model_and_speed_choices_are_saved(self):
+    def test_only_model_thinking_and_speed_choices_are_saved(self):
         self.provider.model = "gpt-first"
+        self.provider.reasoning_effort = "high"
         self.provider.service_tier = "priority"
         self.provider.account = {
             "type": "chatgpt",
@@ -207,8 +220,202 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
 
         self.assertEqual(
             self.app.config["providers"][self.provider.provider_name],
-            {"model": "gpt-first", "service_tier": "priority"},
+            {
+                "model": "gpt-first",
+                "reasoning_effort": "high",
+                "service_tier": "priority",
+            },
         )
+
+    def test_thinking_levels_follow_automatic_and_explicit_model_metadata(self):
+        self.client.models_pages = [[
+            self.client.models_pages[0][0],
+            {
+                "model": "gpt-second",
+                "displayName": "GPT Second",
+                "defaultReasoningEffort": "low",
+                "supportedReasoningEfforts": [
+                    {"reasoningEffort": "minimal", "description": "Smallest"},
+                    {"reasoningEffort": "low", "description": "Fast"},
+                ],
+            },
+        ]]
+        self.client.account = {"type": "chatgpt"}
+        self._settings_window()
+        widget = self.provider.settings_widget
+        self.wait_for(lambda: widget.model_dropdown.findData("gpt-second") != -1)
+
+        self.assertEqual(
+            [widget.reasoning_dropdown.itemData(i) for i in range(widget.reasoning_dropdown.count())],
+            ["", "low", "medium", "high"],
+        )
+        self.assertEqual(
+            widget.reasoning_dropdown.itemData(
+                widget.reasoning_dropdown.findData("medium"),
+                QtCore.Qt.ItemDataRole.ToolTipRole,
+            ),
+            "Balanced",
+        )
+
+        widget.reasoning_dropdown.setCurrentIndex(
+            widget.reasoning_dropdown.findData("high")
+        )
+        widget.model_dropdown.setCurrentIndex(widget.model_dropdown.findData("gpt-second"))
+        self.assertEqual(
+            [widget.reasoning_dropdown.itemData(i) for i in range(widget.reasoning_dropdown.count())],
+            ["", "minimal", "low"],
+        )
+        self.assertEqual(widget.selected_reasoning_effort(), "")
+        self.assertTrue(widget.reasoning_warning.isVisibleTo(widget))
+
+    def test_unsupported_saved_thinking_level_falls_back_to_automatic(self):
+        self.client.models_pages = [[{
+            "model": "gpt-first",
+            "isDefault": True,
+            "defaultReasoningEffort": "low",
+            "supportedReasoningEfforts": [
+                {"reasoningEffort": "low", "description": "Fast"},
+            ],
+        }]]
+        self.client.account = {"type": "chatgpt"}
+        window = self._settings_window({
+            "model": "gpt-first",
+            "reasoning_effort": "high",
+        })
+        widget = self.provider.settings_widget
+        self.wait_for(lambda: self.provider.auth_state == "signed_in")
+
+        self.assertEqual(widget.selected_reasoning_effort(), "")
+        self.assertEqual(self.provider.reasoning_effort, "")
+        self.assertTrue(widget.reasoning_warning.isVisibleTo(widget))
+
+        window.save_settings()
+        self.assertEqual(
+            self.app.config["providers"][self.provider.provider_name]["reasoning_effort"],
+            "",
+        )
+
+    def test_thinking_level_survives_save_restart_and_widget_recreation(self):
+        self.client.account = {"type": "chatgpt"}
+        window = self._settings_window()
+        widget = self.provider.settings_widget
+        self.wait_for(lambda: widget.reasoning_dropdown.findData("high") != -1)
+        widget.reasoning_dropdown.setCurrentIndex(
+            widget.reasoning_dropdown.findData("high")
+        )
+
+        window.save_settings()
+        saved = self.app.config["providers"][self.provider.provider_name]
+        self.assertEqual(saved["reasoning_effort"], "high")
+
+        restarted = OpenAISubscriptionProvider(self.app, client=self.client)
+        restarted.load_config(saved)
+        self.assertEqual(restarted.reasoning_effort, "high")
+
+        widget.deleteLater()
+        QApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+        window = SettingsWindow(self.app, providers_only=True)
+        self.addCleanup(window.deleteLater)
+        self.wait_for(
+            lambda: self.provider.settings_widget.reasoning_dropdown.findData("high") != -1
+        )
+        self.assertEqual(
+            self.provider.settings_widget.selected_reasoning_effort(),
+            "high",
+        )
+
+    def test_missing_invalid_and_unadvertised_thinking_levels_use_automatic(self):
+        for value in (None, 12, []):
+            with self.subTest(value=value):
+                self.provider.load_config({"reasoning_effort": value})
+                self.assertEqual(self.provider.reasoning_effort, "")
+
+        self.client.account = {"type": "chatgpt"}
+        self.provider.load_config({"reasoning_effort": "invented"})
+        self.assertEqual(
+            self.provider.get_response("Proofread.", "Text", return_response=True),
+            "Edited response",
+        )
+        self.assertIsNone(self.client.turns[-1]["reasoning_effort"])
+        self.assertEqual(self.provider.reasoning_effort, "")
+
+    def test_explicit_thinking_level_is_passed_for_automatic_and_selected_models(self):
+        self.client.account = {"type": "chatgpt"}
+        self.provider.models = self.client.models_pages[0][:1]
+        for model in ("", "gpt-first"):
+            with self.subTest(model=model):
+                self.provider.model = model
+                self.provider.reasoning_effort = "high"
+                self.provider.get_response("Proofread.", "Text", return_response=True)
+                self.assertEqual(self.client.turns[-1]["reasoning_effort"], "high")
+
+    def test_older_model_metadata_offers_automatic_thinking_only(self):
+        self.client.models_pages = [[{
+            "model": "legacy-model",
+            "displayName": "Legacy",
+            "isDefault": True,
+        }]]
+        self.client.account = {"type": "chatgpt"}
+        self._settings_window()
+        widget = self.provider.settings_widget
+        self.wait_for(lambda: widget.model_dropdown.findData("legacy-model") != -1)
+
+        self.assertEqual(widget.reasoning_dropdown.count(), 1)
+        self.assertEqual(widget.selected_reasoning_effort(), "")
+        self.assertFalse(widget.reasoning_dropdown.isEnabled())
+
+    def test_settings_keep_saved_thinking_until_authoritative_list_arrives(self):
+        self.client.available = False
+        self.provider.reasoning_effort = "high"
+        widget = _CodexSettingsWidget(self.provider)
+        self.addCleanup(widget.deleteLater)
+
+        widget.apply_models({"models": [], "authoritative": False})
+        self.assertEqual(widget.selected_reasoning_effort(), "high")
+
+        widget.apply_models({
+            "models": [{
+                "model": "gpt-first",
+                "isDefault": True,
+                "supportedReasoningEfforts": [
+                    {"reasoningEffort": "low", "description": "Fast"},
+                ],
+            }],
+            "authoritative": True,
+        })
+        self.assertEqual(widget.selected_reasoning_effort(), "")
+        self.assertEqual(self.provider.reasoning_effort, "")
+        self.assertTrue(widget.reasoning_warning.isVisibleTo(widget))
+
+    def test_model_list_failure_does_not_block_automatic_turn_with_thinking(self):
+        self.client.account = {"type": "chatgpt"}
+        self.provider.reasoning_effort = "high"
+        original_request = self.client.request
+
+        def request(method, params=None, timeout=None):
+            if method == "model/list":
+                raise CodexAppServerError("model/list unavailable")
+            return original_request(method, params, timeout)
+
+        self.client.request = request
+        self.assertEqual(
+            self.provider.get_response("Proofread.", "Text", return_response=True),
+            "Edited response",
+        )
+        self.assertIsNone(self.client.turns[-1]["reasoning_effort"])
+        self.app.show_message_signal.emit.assert_not_called()
+
+    def test_sign_out_after_model_list_keeps_saved_thinking_level(self):
+        self.client.available = False
+        self.provider.reasoning_effort = "high"
+        widget = _CodexSettingsWidget(self.provider)
+        self.addCleanup(widget.deleteLater)
+
+        widget.apply_models({"models": self.client.models_pages[0][:1], "authoritative": True})
+        self.assertEqual(widget.selected_reasoning_effort(), "high")
+
+        widget.apply_models({"models": [], "authoritative": False})
+        self.assertEqual(widget.selected_reasoning_effort(), "high")
 
     def test_saved_speed_applies_to_automatic_and_explicit_models(self):
         self.client.account = {"type": "chatgpt"}
@@ -294,7 +501,11 @@ class OpenAISubscriptionProviderTests(unittest.TestCase):
         self.wait_for(lambda: self.provider.auth_state == "signed_in")
         window.save_settings()
         saved = self.app.config["providers"][self.provider.provider_name]
-        self.assertEqual(saved, {"model": "gpt-standard-only", "service_tier": "default"})
+        self.assertEqual(saved, {
+            "model": "gpt-standard-only",
+            "reasoning_effort": "",
+            "service_tier": "default",
+        })
 
         widget.model_dropdown.setCurrentIndex(widget.model_dropdown.findData("gpt-fast"))
         self.assertTrue(widget.speed_setting.dropdown.isEnabled())

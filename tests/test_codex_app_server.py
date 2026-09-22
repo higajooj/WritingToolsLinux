@@ -200,6 +200,7 @@ class CodexAppServerClientTests(unittest.TestCase):
             base_instructions="Only edit text.",
             developer_instructions="Proofread.",
             input_text="Some text",
+            reasoning_effort="high",
             service_tier="priority",
             on_started=lambda thread_id, turn_id: started.append((thread_id, turn_id)),
         )
@@ -211,6 +212,10 @@ class CodexAppServerClientTests(unittest.TestCase):
         self.assertEqual(thread_params["sandbox"], "read-only")
         self.assertEqual(thread_params["approvalPolicy"], "never")
         self.assertEqual(thread_params["cwd"], "/private/runtime")
+        self.assertEqual(
+            thread_params["config"],
+            {"model_reasoning_effort": "high"},
+        )
         self.assertNotIn("serviceTier", thread_params)
         turn_params = client.calls[1][1]
         self.assertEqual(turn_params["serviceTierForTurn"], "priority")
@@ -238,6 +243,18 @@ class CodexAppServerClientTests(unittest.TestCase):
                     self.assertNotIn("serviceTierForTurn", turn_params)
                 else:
                     self.assertEqual(turn_params["serviceTierForTurn"], tier)
+
+    def test_turn_reasoning_override_is_omitted_for_automatic(self):
+        client = _ScriptedTurnClient({
+            "id": "turn-1", "status": "completed",
+            "items": [{"type": "agentMessage", "text": "Edited."}],
+        })
+        client.run_turn(
+            model="", base_instructions="", developer_instructions="",
+            input_text="Text", reasoning_effort=None,
+        )
+
+        self.assertNotIn("config", client.calls[0][1])
 
     def test_unsuccessful_turn_exposes_structured_error(self):
         client = _ScriptedTurnClient({
