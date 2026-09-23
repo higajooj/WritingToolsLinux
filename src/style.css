@@ -1,0 +1,91 @@
+/* Popup */
+window.popup {
+  border-radius: 12px;
+}
+
+.popup-bar-button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px;
+}
+
+.popup-close {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  font-size: 20px;
+  font-weight: bold;
+  background: none;
+}
+
+.popup-close:hover {
+  background-color: alpha(currentColor, 0.1);
+}
+
+.option-button {
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+/* Room for the edit/delete corners. */
+.editing .option-button {
+  padding-left: 22px;
+  padding-right: 22px;
+}
+
+.option-button.selected {
+  background-color: alpha(@accent_bg_color, 0.25);
+  box-shadow: inset 0 0 0 2px @accent_color;
+}
+
+.option-button.drop-before {
+  box-shadow: inset 3px 0 0 @accent_color;
+}
+
+.option-button.drop-after {
+  box-shadow: inset -3px 0 0 @accent_color;
+}
+
+.corner-button {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  margin: 2px;
+}
+
+/* Button editor */
+.card-textview,
+.card-textview text {
+  background: transparent;
+  padding: 6px;
+}
+
+/* Response window */
+.user-message {
+  padding: 4px 2px;
+}
+
+.assistant-message {
+  padding: 12px 12px 4px 12px;
+}
+
+.md-code {
+  background-color: alpha(currentColor, 0.07);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.md-quote {
+  border-left: 3px solid alpha(currentColor, 0.3);
+  padding-left: 10px;
+}
+
+.md-table .md-th,
+.md-table .md-td {
+  padding: 6px 10px;
+  border: 1px solid alpha(currentColor, 0.15);
+}
+
+.md-table .md-th {
+  background-color: alpha(currentColor, 0.06);
+}

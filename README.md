@@ -1,26 +1,31 @@
 # Writing Tools for Linux
 
 Writing Tools is a Wayland-only AI writing assistant for Linux, built with
-Python and PySide6. Copy text, then use a shortcut to proofread, rewrite,
+Rust, GTK 4 and libadwaita. Copy text, then use a shortcut to proofread, rewrite,
 change tone, summarize, or apply custom instructions. It supports Gemini,
 ChatGPT subscriptions, Ollama, and OpenAI-compatible servers.
 
 ## Run
 
-Install `wl-clipboard`, `xdg-desktop-portal`, and your compositor's portal
-backend. For Hyprland, use `xdg-desktop-portal-hyprland`.
-
-From the repository root, create a virtual environment and install dependencies:
+Install GTK 4 (4.14 or newer), libadwaita (1.5 or newer), `wl-clipboard`,
+`xdg-desktop-portal`, and your compositor's portal backend. For Hyprland, use
+`xdg-desktop-portal-hyprland`. On Arch Linux:
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python main.py
+sudo pacman -S --needed gtk4 libadwaita wl-clipboard xdg-desktop-portal xdg-desktop-portal-hyprland rustup
+rustup default stable
 ```
 
-With the virtual environment active, you can also launch the root `main.py`
-by absolute path from any directory.
+From the repository root, build and run:
+
+```sh
+cargo run --release
+```
+
+The binary is `target/release/writing-tools`; the icons and default buttons
+are compiled into it, so you can copy it anywhere on your `PATH`. A tray icon
+(StatusNotifierItem) gives access to Settings, Pause, About, and Exit; running
+the binary again while it is already running opens Settings.
 
 Configure your provider in the initial setup or Settings. The default shortcut
 is `ctrl+space`; change it if it conflicts with another application. See
@@ -32,12 +37,14 @@ is `ctrl+space`; change it if it conflicts with another application. See
 Writing Tools creates
 `~/.local/share/applications/com.writingtools.WritingTools.desktop` on first
 launch, using `$XDG_DATA_HOME/applications` instead if `XDG_DATA_HOME` is an
-absolute path. It points to the interpreter and checkout used to launch the
-app. Existing entries are left unchanged. The GlobalShortcuts portal requires
-this entry to bind shortcuts.
+absolute path. Its `Exec` line points to the binary that was launched, and its
+icon is installed as `com.writingtools.WritingTools` under
+`icons/hicolor/256x256/apps` in the same data directory. Existing entries are
+left unchanged. The GlobalShortcuts portal requires this entry to bind
+shortcuts.
 
-After relocating a checkout, update the existing entry's `Exec` and `Icon`
-paths, or delete it and relaunch to have a fresh one written.
+After moving the binary, update the existing entry's `Exec` path, or delete it
+and relaunch to have a fresh one written.
 
 ## Shortcuts
 
@@ -126,10 +133,11 @@ for window criteria and rules. Other compositors need their own equivalent.
 - Local models through Ollama or an OpenAI-compatible server.
 - Browser-based ChatGPT subscription sign-in through the official Codex CLI.
 
-Settings, including provider credentials, are stored locally in the ignored
-`config.json` beside `main.py`. Keep it private. Custom buttons and their
-shortcuts are stored in the ignored root `options.json`, which is created from
-the bundled defaults on first launch. Text is sent to the provider you
+Settings, including provider credentials, are stored in
+`~/.config/writing-tools/config.json` (under `$XDG_CONFIG_HOME` when set),
+readable only by you. Keep it private. Custom buttons and their shortcuts are
+stored beside it in `options.json`, which is created from the bundled defaults
+on first launch. Text is sent to the provider you
 configure when you invoke writing actions; local providers can keep processing
 on your machine.
 
@@ -194,15 +202,34 @@ See also [Codex speed and credit usage](https://learn.chatgpt.com/docs/agent-con
 
 ## Development
 
-Run the tests from the repository root:
+Run the tests and lints from the repository root:
 
 ```sh
-QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
+cargo test
+cargo clippy --all-targets
 ```
 
-Update with `git pull`, then reinstall dependencies if `requirements.txt` changed.
-Both `config.json` and `options.json` are ignored user data and remain untouched
-by normal source updates; back them up if you want an additional copy.
+Update with `git pull` and rebuild. `config.json` and `options.json` live in
+your configuration directory and are untouched by source updates; back them up
+if you want an additional copy.
+
+### Upgrading from the Python version
+
+Earlier versions kept `config.json` and `options.json` in the repository root.
+Move them to the new location:
+
+```sh
+mkdir -p ~/.config/writing-tools
+mv config.json options.json ~/.config/writing-tools/
+```
+
+Then delete `~/.local/share/applications/com.writingtools.WritingTools.desktop`,
+which still points to `python main.py`, and relaunch so a new entry is written
+for the binary. The ChatGPT subscription sign-in is kept: it lives in
+`~/.local/share/com.writingtools.WritingTools/codex`, which has not moved.
+Configurations from before the 2026 Gemini model changes are no longer
+migrated automatically; if your Gemini model is a retired Gemma 3 preset,
+choose a current model in Settings.
 
 ## Credits
 

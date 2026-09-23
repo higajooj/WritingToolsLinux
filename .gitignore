@@ -1,7 +1,9 @@
 .DS_Store
+/target/
+
+# Settings from the Python version; move them to ~/.config/writing-tools/.
 /config.json
 /options.json
 /.venv/
 
 .idea
-**/__pycache__

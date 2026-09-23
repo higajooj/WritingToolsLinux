@@ -1,7 +1,0 @@
-darkdetect
-google-genai
-openai
-PySide6
-dbus-next
-markdown2
-ollama
