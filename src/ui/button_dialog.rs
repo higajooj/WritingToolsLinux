@@ -229,14 +229,17 @@ pub fn open(
     hotkey.set_activates_default(true);
 
     cancel.connect_clicked({
-        let dialog = dialog.clone();
+        let dialog = dialog.downgrade();
         move |_| {
-            dialog.close();
+            if let Some(dialog) = dialog.upgrade() {
+                dialog.close();
+            }
         }
     });
     ok.connect_clicked({
-        let dialog = dialog.clone();
+        let dialog = dialog.downgrade();
         move |_| {
+            let Some(dialog) = dialog.upgrade() else { return };
             let hotkey = hotkey.text().trim().to_lowercase();
             let data = ButtonData {
                 name: name.text().trim().to_owned(),

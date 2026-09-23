@@ -59,9 +59,10 @@ pub fn show(app: &Rc<App>) {
     let finished = Rc::new(Cell::new(false));
     next.connect_clicked({
         let app = app.clone();
-        let window = window.clone();
+        let window = window.downgrade();
         let finished = finished.clone();
         move |_| {
+            let Some(window) = window.upgrade() else { return };
             let text = shortcut.text().trim().to_owned();
             if let Err(problem) = validate_trigger(&text) {
                 show_message(Some(&window), "Invalid shortcut", &format!("Invalid shortcut: '{text}'.\n\n{problem}"));
