@@ -179,9 +179,12 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, prompt: String, sy
     });
     send.connect_clicked(move |_| send_message());
 
+    // This handler owns the response until the window closes. Releasing it
+    // then breaks the response -> window -> handler cycle.
     window.connect_close_request({
-        let response = response.clone();
+        let owner = RefCell::new(Some(response.clone()));
         move |_| {
+            let Some(response) = owner.take() else { return glib::Propagation::Proceed };
             if let Some(request) = response.request.take() {
                 request.abort();
             }

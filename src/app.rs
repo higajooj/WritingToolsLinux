@@ -188,6 +188,9 @@ impl App {
     pub fn register_hotkey(&self) {
         self.shortcut.borrow_mut().entry_error = portal::ensure_desktop_entry();
         let shortcut = self.config.borrow().shortcut().to_owned();
+        if self.shortcut.borrow().registered && self.portal.borrow().trigger() == Some(shortcut.as_str()) {
+            return;
+        }
         {
             let mut status = self.shortcut.borrow_mut();
             status.registered = false;
@@ -198,7 +201,8 @@ impl App {
 
     fn on_portal_event(self: &Rc<Self>, event: PortalEvent) {
         match event {
-            PortalEvent::Registered(result) => {
+            PortalEvent::Registered(generation, _) if !self.portal.borrow().is_current(generation) => {}
+            PortalEvent::Registered(_, result) => {
                 let mut status = self.shortcut.borrow_mut();
                 status.registered = result.is_ok();
                 status.portal_error = result.err();

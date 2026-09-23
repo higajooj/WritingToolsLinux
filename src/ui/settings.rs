@@ -105,7 +105,11 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
             button.set_sensitive(true);
         });
     });
+    // This handler owns the settings until the dialog closes. Releasing them
+    // then breaks the settings -> dialog -> handler cycle.
+    let owner = RefCell::new(Some(settings));
     dialog.connect_closed(move |_| {
+        let Some(settings) = owner.take() else { return };
         if settings.providers_only && !settings.saved.get() {
             settings.app.exit();
         }
@@ -447,7 +451,16 @@ impl SubscriptionPanel {
         })
     }
 
+    /// Until the model list is known, keep the saved model rather than
+    /// replacing it with the placeholder "Automatic" entry.
     fn selected_model(&self) -> String {
+        if !self.authoritative.get() {
+            return self.choices.borrow().model.clone();
+        }
+        self.row_model()
+    }
+
+    fn row_model(&self) -> String {
         self.model_ids.borrow().get(self.model_row.selected() as usize).cloned().unwrap_or_default()
     }
 
@@ -462,7 +475,7 @@ impl SubscriptionPanel {
 
     fn model_selected(&self) {
         let effort = self.selected_effort();
-        self.choices.borrow_mut().model = self.selected_model();
+        self.choices.borrow_mut().model = self.row_model();
         self.refresh_reasoning(&effort, true);
         self.update_speed();
     }

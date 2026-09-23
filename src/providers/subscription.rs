@@ -78,6 +78,9 @@ struct State {
     models: Vec<Value>,
     account: Option<Value>,
     pending_login_id: Option<String>,
+    /// Bumped by each sign-in attempt and by cancelling one, so a
+    /// `login/start` that returns after a cancel knows it is stale.
+    login_attempt: u64,
     subscribed: bool,
 }
 
@@ -207,6 +210,7 @@ impl Subscription {
                 models: Vec::new(),
                 account: None,
                 pending_login_id: None,
+                login_attempt: 0,
                 subscribed: false,
             }),
             status: watch::channel(Status {
@@ -334,6 +338,11 @@ impl Subscription {
         if self.status().state == AuthState::SigningIn {
             return;
         }
+        let attempt = {
+            let mut state = self.state.lock().unwrap();
+            state.login_attempt += 1;
+            state.login_attempt
+        };
         self.set_status(AuthState::SigningIn, "Waiting for sign-in in your browser…");
         let this = self.clone();
         runtime::spawn(async move {
@@ -354,7 +363,26 @@ impl Subscription {
                         code: None,
                     });
                 };
-                this.state.lock().unwrap().pending_login_id = Some(login_id.to_owned());
+                let stale = {
+                    let mut state = this.state.lock().unwrap();
+                    let stale = state.login_attempt != attempt;
+                    if !stale {
+                        state.pending_login_id = Some(login_id.to_owned());
+                    }
+                    stale
+                };
+                if stale {
+                    // Cancelled while `login/start` was in flight.
+                    let _ = this
+                        .client
+                        .request_with_timeout(
+                            "account/login/cancel",
+                            Some(json!({"loginId": login_id})),
+                            Duration::from_secs(5),
+                        )
+                        .await;
+                    return Ok(());
+                }
                 if open::that_detached(auth_url).is_err() {
                     this.status.send_replace(Status {
                         state: AuthState::SigningIn,
@@ -366,14 +394,27 @@ impl Subscription {
             }
             .await;
             if let Err(error) = result {
-                this.state.lock().unwrap().pending_login_id = None;
-                this.set_status(AuthState::Error, friendly(&error));
+                let mut state = this.state.lock().unwrap();
+                if state.login_attempt == attempt {
+                    state.pending_login_id = None;
+                    drop(state);
+                    this.set_status(AuthState::Error, friendly(&error));
+                }
             }
         });
     }
 
     pub fn cancel_login(self: &Arc<Self>) {
-        let Some(login_id) = self.state.lock().unwrap().pending_login_id.clone() else {
+        let pending = {
+            let mut state = self.state.lock().unwrap();
+            let pending = state.pending_login_id.clone();
+            if pending.is_none() {
+                // `login/start` has not returned yet; make it stand down.
+                state.login_attempt += 1;
+            }
+            pending
+        };
+        let Some(login_id) = pending else {
             self.status.send_replace(signed_out_status("ChatGPT sign-in was cancelled."));
             return;
         };

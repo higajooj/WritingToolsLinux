@@ -8,6 +8,7 @@ use ashpd::desktop::CreateSessionOptions;
 use ashpd::desktop::global_shortcuts::{BindShortcutsOptions, GlobalShortcuts, NewShortcut};
 use futures_util::StreamExt;
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 use crate::paths::{self, APP_ID};
 use crate::runtime;
@@ -149,8 +150,9 @@ pub fn ensure_desktop_entry() -> String {
 }
 
 pub enum PortalEvent {
-    /// Registration finished; `Err` carries the portal's error text.
-    Registered(Result<(), String>),
+    /// Registration `generation` finished; `Err` carries the portal's error
+    /// text. Check it with [`ShortcutPortal::is_current`].
+    Registered(u64, Result<(), String>),
     Activated(String),
 }
 
@@ -159,6 +161,9 @@ pub enum PortalEvent {
 #[derive(Default)]
 pub struct ShortcutPortal {
     stop: Option<oneshot::Sender<()>>,
+    task: Option<JoinHandle<()>>,
+    generation: u64,
+    trigger: Option<String>,
 }
 
 impl ShortcutPortal {
@@ -166,18 +171,38 @@ impl ShortcutPortal {
     /// delivered on `events`.
     pub fn register(&mut self, trigger: &str, events: async_channel::Sender<PortalEvent>) {
         self.stop();
+        let previous = self.task.take();
         let (stop_tx, stop_rx) = oneshot::channel();
         self.stop = Some(stop_tx);
+        self.generation += 1;
+        self.trigger = Some(trigger.to_owned());
+        let generation = self.generation;
         let trigger = trigger.to_owned();
-        runtime::spawn(async move {
-            if let Err(e) = run_session(&trigger, &events, stop_rx).await {
-                log::warn!("Wayland GlobalShortcuts unavailable: {e}");
-                let _ = events.send(PortalEvent::Registered(Err(e.to_string()))).await;
+        self.task = Some(runtime::spawn(async move {
+            // Activated signals are not tied to a session, so the previous
+            // session must be closed before this one binds.
+            if let Some(previous) = previous {
+                let _ = previous.await;
             }
-        });
+            if let Err(e) = run_session(&trigger, generation, &events, stop_rx).await {
+                log::warn!("Wayland GlobalShortcuts unavailable: {e}");
+                let _ = events.send(PortalEvent::Registered(generation, Err(e.to_string()))).await;
+            }
+        }));
+    }
+
+    /// The trigger of the latest registration, if a session is live.
+    pub fn trigger(&self) -> Option<&str> {
+        self.trigger.as_deref()
+    }
+
+    /// Whether an event with this generation belongs to the latest registration.
+    pub fn is_current(&self, generation: u64) -> bool {
+        self.stop.is_some() && generation == self.generation
     }
 
     pub fn stop(&mut self) {
+        self.trigger = None;
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
@@ -208,24 +233,37 @@ async fn register_app_id() {
 
 async fn run_session(
     trigger: &str,
+    generation: u64,
     events: &async_channel::Sender<PortalEvent>,
     mut stop: oneshot::Receiver<()>,
 ) -> ashpd::Result<()> {
     register_app_id().await;
-    let portal = GlobalShortcuts::new().await?;
-    let session = portal.create_session(CreateSessionOptions::default()).await?;
+    let portal = tokio::select! {
+        _ = &mut stop => return Ok(()),
+        portal = GlobalShortcuts::new() => portal?,
+    };
+    let session = tokio::select! {
+        _ = &mut stop => return Ok(()),
+        session = portal.create_session(CreateSessionOptions::default()) => session?,
+    };
     let result = async {
         let preferred = portal_trigger(trigger);
         let shortcuts =
             [NewShortcut::new(GLOBAL_ID, format!("Writing Tools: {GLOBAL_ID}")).preferred_trigger(preferred.as_str())];
         let mut activated = portal.receive_activated().await?;
-        portal.bind_shortcuts(&session, &shortcuts, None, BindShortcutsOptions::default()).await?.response()?;
+        // Binding can wait on a user dialog; a newer registration must not
+        // wait for it.
+        let bound = tokio::select! {
+            _ = &mut stop => return Ok(()),
+            bound = portal.bind_shortcuts(&session, &shortcuts, None, BindShortcutsOptions::default()) => bound,
+        };
+        bound?.response()?;
         log::info!("Wayland GlobalShortcuts bound for {APP_ID}: {GLOBAL_ID}");
         let hint = compositor_bind_hint(trigger);
         if !hint.is_empty() {
             log::info!("{hint}");
         }
-        let _ = events.send(PortalEvent::Registered(Ok(()))).await;
+        let _ = events.send(PortalEvent::Registered(generation, Ok(()))).await;
 
         // Each session is closed before the next is created, so every
         // Activated signal on this connection belongs to this session.

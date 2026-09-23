@@ -154,8 +154,12 @@ pub fn show(app: &Rc<App>) -> gtk::Window {
     add_button.connect_clicked(with(Popup::add_button_clicked));
     send.connect_clicked(with(Popup::submit));
     close_button.connect_clicked({
-        let window = window.clone();
-        move |_| window.close()
+        let window = window.downgrade();
+        move |_| {
+            if let Some(window) = window.upgrade() {
+                window.close();
+            }
+        }
     });
     entry.connect_activate({
         let weak = Rc::downgrade(&popup);
@@ -171,10 +175,12 @@ pub fn show(app: &Rc<App>) -> gtk::Window {
     // submitting, or pressing the hotkey again.
     let escape = gtk::EventControllerKey::new();
     escape.connect_key_pressed({
-        let window = window.clone();
+        let window = window.downgrade();
         move |_, key, _, _| {
             if key == gdk::Key::Escape {
-                window.close();
+                if let Some(window) = window.upgrade() {
+                    window.close();
+                }
                 glib::Propagation::Stop
             } else {
                 glib::Propagation::Proceed
@@ -183,10 +189,14 @@ pub fn show(app: &Rc<App>) -> gtk::Window {
     });
     window.add_controller(escape);
 
+    // This handler owns the popup until the window closes. Releasing it then
+    // breaks the popup -> window -> handler cycle.
     window.connect_close_request({
-        let popup = popup.clone();
+        let owner = RefCell::new(Some(popup.clone()));
         move |window| {
-            popup.app.forget_popup(window);
+            if let Some(popup) = owner.take() {
+                popup.app.forget_popup(window);
+            }
             glib::Propagation::Proceed
         }
     });
