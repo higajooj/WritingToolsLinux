@@ -273,7 +273,14 @@ impl Subscription {
         // The account probe runs in the background, so a Save clicked moments
         // after Settings opened waits for it instead of reporting no account.
         let mut status = self.status.subscribe();
-        let _ = tokio::time::timeout(ACCOUNT_PROBE_WAIT, status.wait_for(|s| s.state != AuthState::Checking)).await;
+        // Settings calls `validate` from GLib's local executor, which does not
+        // provide a Tokio timer driver. Keep the timeout inside the Tokio
+        // runtime while awaiting its task from the UI executor.
+        let _ = runtime::spawn(async move {
+            let _ =
+                tokio::time::timeout(ACCOUNT_PROBE_WAIT, status.wait_for(|s| s.state != AuthState::Checking)).await;
+        })
+        .await;
         if self.is_authenticated() {
             return Ok(());
         }

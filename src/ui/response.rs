@@ -277,10 +277,12 @@ impl Response {
     }
 
     fn add_assistant_message(self: &Rc<Self>, text: &str) {
+        let message = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
         card.add_css_class("card");
         card.add_css_class("assistant-message");
         card.append(&markdown::render(text));
+        message.append(&card);
 
         let copy = icons::button("copy", 16, "Copy response");
         copy.add_css_class("flat");
@@ -292,8 +294,8 @@ impl Response {
             button.clipboard().set_text(&text);
             toasts.add_toast(adw::Toast::builder().title("Copied to clipboard").timeout(2).build());
         });
-        card.append(&copy);
-        self.append(&card);
+        message.append(&copy);
+        self.append(&message);
     }
 
     fn add_note(self: &Rc<Self>, text: &str) {
