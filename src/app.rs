@@ -1,6 +1,6 @@
 //! Application state and the flow from hotkey to result.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -38,7 +38,6 @@ pub struct App {
     pub options: RefCell<Options>,
     provider: RefCell<Option<Arc<dyn Provider>>>,
     pub subscription: Arc<Subscription>,
-    paused: Cell<bool>,
     triggers: RefCell<Vec<Instant>>,
     popup: RefCell<Option<gtk::Window>>,
     /// The clipboard text captured when the popup opened.
@@ -86,7 +85,6 @@ impl App {
             options: RefCell::new(options),
             provider: RefCell::new(None),
             subscription: Subscription::new(codex::CodexClient::new(paths::codex_data_root())),
-            paused: Cell::new(false),
             triggers: RefCell::new(Vec::new()),
             popup: RefCell::new(None),
             captured: RefCell::new(None),
@@ -212,11 +210,7 @@ impl App {
                 }
             }
             PortalEvent::Activated(id) if id == portal::GLOBAL_ID => {
-                if self.paused.get() {
-                    log::debug!("Paused; ignoring shortcut \"{id}\"");
-                } else {
-                    self.on_hotkey();
-                }
+                self.on_hotkey();
             }
             PortalEvent::Activated(_) => {}
         }
@@ -415,13 +409,6 @@ impl App {
                 let Some(app) = weak.upgrade() else { break };
                 match action {
                     TrayAction::Settings => ui::settings::show(&app, false),
-                    TrayAction::TogglePause => {
-                        app.paused.set(!app.paused.get());
-                        log::debug!("{}", if app.paused.get() { "App is paused" } else { "App is resumed" });
-                        if let Some(tray) = &*app.tray.borrow() {
-                            tray.set_paused(app.paused.get());
-                        }
-                    }
                     TrayAction::About => ui::about::show(),
                     TrayAction::Exit => app.exit(),
                 }

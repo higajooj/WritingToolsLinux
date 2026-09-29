@@ -24,7 +24,7 @@ cargo run --release
 
 The binary is `target/release/writing-tools`; the icons and default buttons
 are compiled into it, so you can copy it anywhere on your `PATH`. A tray icon
-(StatusNotifierItem) gives access to Settings, Pause, About, and Exit; running
+(StatusNotifierItem) gives access to Settings, About, and Exit; running
 the binary again while it is already running opens Settings.
 
 Configure your provider in the initial setup or Settings. The default shortcut

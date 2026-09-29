@@ -10,7 +10,6 @@ use crate::runtime;
 #[derive(Clone, Copy, Debug)]
 pub enum TrayAction {
     Settings,
-    TogglePause,
     About,
     Exit,
 }
@@ -19,7 +18,6 @@ struct WritingToolsTray {
     normal: Vec<Icon>,
     ready_icon: Vec<Icon>,
     ready: bool,
-    paused: bool,
     actions: async_channel::Sender<TrayAction>,
 }
 
@@ -63,7 +61,6 @@ impl ksni::Tray for WritingToolsTray {
     fn menu(&self) -> Vec<MenuItem<Self>> {
         vec![
             self.item("Settings", TrayAction::Settings),
-            self.item(if self.paused { "Resume" } else { "Pause" }, TrayAction::TogglePause),
             self.item("About", TrayAction::About),
             self.item("Exit", TrayAction::Exit),
         ]
@@ -91,7 +88,6 @@ impl Tray {
             normal: pixmaps(icons::app_icon_pixbuf(64)),
             ready_icon: pixmaps(icons::pixbuf("clipboard_ready", 64, None)),
             ready: false,
-            paused: false,
             actions,
         };
         match runtime::spawn(tray.spawn()).await {
@@ -109,10 +105,6 @@ impl Tray {
 
     pub fn set_ready(&self, ready: bool) {
         self.update(move |tray| tray.ready = ready);
-    }
-
-    pub fn set_paused(&self, paused: bool) {
-        self.update(move |tray| tray.paused = paused);
     }
 
     fn update(&self, f: impl FnOnce(&mut WritingToolsTray) + Send + 'static) {
