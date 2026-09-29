@@ -46,6 +46,18 @@ fn next_zoom(current: f64, action: Zoom) -> f64 {
     }
 }
 
+fn user_label(text: &str, css_class: &str) -> gtk::Label {
+    let label = gtk::Label::new(Some(text));
+    label.set_wrap(true);
+    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    label.set_xalign(0.0);
+    label.set_selectable(true);
+    label.set_can_focus(false);
+    label.add_css_class("user-message");
+    label.add_css_class(css_class);
+    label
+}
+
 struct Response {
     app: Rc<App>,
     window: adw::ApplicationWindow,
@@ -65,8 +77,9 @@ struct Response {
     follow_end: RefCell<Option<glib::SourceId>>,
 }
 
-/// Open a window for `option`, show the user's text, and run the request.
-pub fn open(app: &Rc<App>, option: &str, selected_text: &str, prompt: String, system: String) {
+/// Open a window for `option`, show the user's instructions and text, and run
+/// the request.
+pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str>, prompt: String, system: String) {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let css_name = format!("response-chat-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
 
@@ -195,6 +208,9 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, prompt: String, sy
         }
     });
 
+    if let Some(extra) = extra.map(str::trim).filter(|e| !e.is_empty()) {
+        response.add_instruction_message(extra);
+    }
     response.add_user_message(selected_text);
     response.start_thinking(true);
     window.present();
@@ -266,14 +282,12 @@ impl Response {
     // ------------------------------------------------------------ messages
 
     fn add_user_message(self: &Rc<Self>, text: &str) {
-        let label = gtk::Label::new(Some(text));
-        label.set_wrap(true);
-        label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        label.set_xalign(0.0);
-        label.set_selectable(true);
-        label.set_can_focus(false);
-        label.add_css_class("user-message");
-        self.append(&label);
+        self.append(&user_label(text, "user-message"));
+    }
+
+    /// The extra instructions typed in the popup, shown above the text.
+    fn add_instruction_message(self: &Rc<Self>, text: &str) {
+        self.append(&user_label(text, "instruction-message"));
     }
 
     fn add_assistant_message(self: &Rc<Self>, text: &str) {

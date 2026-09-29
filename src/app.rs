@@ -322,7 +322,7 @@ impl App {
             let user_prompt = prompt::build_option_prompt(&name, &option, &text, extra.as_deref());
 
             if option.open_in_window {
-                ui::response::open(&app, &name, &text, user_prompt, system);
+                ui::response::open(&app, &name, &text, extra.as_deref(), user_prompt, system);
                 return;
             }
 

@@ -65,6 +65,10 @@ window.popup {
   padding: 4px 2px;
 }
 
+.instruction-message {
+  font-weight: bold;
+}
+
 .assistant-message {
   padding: 12px;
 }
