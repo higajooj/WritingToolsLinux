@@ -111,8 +111,23 @@ fn shell_quote(value: &str) -> String {
     format!("\"{escaped}\"")
 }
 
-/// Create the desktop entry and icon required by the portal. Existing files
-/// are left unchanged. Returns a user-facing problem, or an empty string.
+/// Whether the entry's `Exec` binary is gone. The portal rejects such entries
+/// ("App info not found"), e.g. one left behind by an earlier install.
+fn exec_target_missing(contents: &str) -> bool {
+    let Some(exec) = contents.lines().find_map(|line| line.strip_prefix("Exec=")) else {
+        return true;
+    };
+    let exec = exec.trim();
+    let program = match exec.strip_prefix('"') {
+        Some(rest) => rest.split('"').next().unwrap_or_default(),
+        None => exec.split_whitespace().next().unwrap_or_default(),
+    };
+    !program.is_empty() && program.starts_with('/') && !std::path::Path::new(program).exists()
+}
+
+/// Create the desktop entry and icon required by the portal. A working
+/// existing entry is left unchanged; one whose binary is gone is rewritten.
+/// Returns a user-facing problem, or an empty string.
 pub fn ensure_desktop_entry() -> String {
     let icon = icon_path();
     if !icon.exists() {
@@ -124,9 +139,11 @@ pub fn ensure_desktop_entry() -> String {
     }
 
     let path = desktop_entry_path();
-    if path.exists() {
-        return String::new();
-    }
+    let stale = match std::fs::read_to_string(&path) {
+        Ok(contents) if !exec_target_missing(&contents) => return String::new(),
+        Ok(_) => true,
+        Err(_) => false,
+    };
     let result = std::env::current_exe().and_then(|exe| {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -135,7 +152,8 @@ pub fn ensure_desktop_entry() -> String {
     });
     match result {
         Ok(()) => {
-            log::info!("Installed desktop entry {} for portal app ID {APP_ID}", path.display());
+            let action = if stale { "Rewrote stale" } else { "Installed" };
+            log::info!("{action} desktop entry {} for portal app ID {APP_ID}", path.display());
             String::new()
         }
         Err(e) => {
@@ -318,6 +336,15 @@ mod tests {
             hyprland_bind("ctrl+shift+space", "global"),
             "bind = CTRL SHIFT, SPACE, global, com.writingtools.WritingTools:global"
         );
+    }
+
+    #[test]
+    fn detects_missing_exec_target() {
+        assert!(exec_target_missing("[Desktop Entry]\nExec=/nonexistent/dir/writing-tools\n"));
+        assert!(exec_target_missing("[Desktop Entry]\nExec=\"/nonexistent dir/wt\" %U\n"));
+        assert!(exec_target_missing("[Desktop Entry]\nName=x\n"));
+        assert!(!exec_target_missing("[Desktop Entry]\nExec=/bin/sh\n"));
+        assert!(!exec_target_missing("[Desktop Entry]\nExec=writing-tools\n"));
     }
 
     #[test]
