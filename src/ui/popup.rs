@@ -313,11 +313,15 @@ impl Popup {
         self.entry.set_placeholder_text(Some(if selected.is_some() { PLACEHOLDER_SELECTED } else { PLACEHOLDER }));
     }
 
-    fn submit(self: &Rc<Self>) {
+    /// The typed instructions, if any.
+    fn extra(&self) -> Option<String> {
         let text = self.entry.text().trim().to_owned();
-        let extra = (!text.is_empty()).then_some(text);
+        (!text.is_empty()).then_some(text)
+    }
+
+    fn submit(self: &Rc<Self>) {
         let selected = self.selected.borrow().clone();
-        match (selected, extra) {
+        match (selected, self.extra()) {
             (Some(option), extra) => {
                 self.app.process_option(option, extra);
                 self.window.close();
@@ -371,7 +375,7 @@ impl Popup {
                     && !popup.edit_mode.get()
                     && popup.window.is_active()
                 {
-                    popup.app.process_option(key.clone(), None);
+                    popup.app.process_option(key.clone(), popup.extra());
                     popup.window.close();
                 }
                 glib::Propagation::Stop
