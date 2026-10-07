@@ -30,6 +30,91 @@ pub fn escape(text: &str) -> String {
     escaped
 }
 
+fn unescape(text: &str) -> String {
+    let mut unescaped = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(index) = rest.find('&') {
+        unescaped.push_str(&rest[..index]);
+        rest = &rest[index..];
+        let entity = [("&amp;", '&'), ("&lt;", '<'), ("&gt;", '>'), ("&quot;", '"'), ("&#39;", '\'')]
+            .into_iter()
+            .find(|(entity, _)| rest.starts_with(entity));
+        match entity {
+            Some((entity, c)) => {
+                unescaped.push(c);
+                rest = &rest[entity.len()..];
+            }
+            None => {
+                unescaped.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    unescaped.push_str(rest);
+    unescaped
+}
+
+/// Markdown for characters `start..end` of the text shown by `markup`, which
+/// is inline markup as produced by [`parse`]. Formatting that covers only
+/// part of the range is closed around that part.
+pub fn selection_markdown(markup: &str, start: usize, end: usize) -> String {
+    struct Open {
+        open: &'static str,
+        close: String,
+        emitted: bool,
+    }
+    let mut markdown = String::new();
+    let mut open: Vec<Open> = Vec::new();
+    let mut position = 0;
+    let mut rest = markup;
+    while position < end && !rest.is_empty() {
+        if rest.starts_with('<')
+            && let Some(close) = rest.find('>')
+        {
+            let tag = &rest[1..close];
+            rest = &rest[close + 1..];
+            if tag.starts_with('/') {
+                if let Some(tag) = open.pop()
+                    && tag.emitted
+                {
+                    markdown.push_str(&tag.close);
+                }
+                continue;
+            }
+            let (marker, close) = match tag.split_whitespace().next().unwrap_or_default() {
+                "b" => ("**", "**".to_owned()),
+                "i" => ("*", "*".to_owned()),
+                "s" => ("~~", "~~".to_owned()),
+                "tt" => ("`", "`".to_owned()),
+                "a" => {
+                    let url = tag.split_once("href=\"").and_then(|(_, url)| url.split_once('"')).map(|(url, _)| url);
+                    ("[", format!("]({})", unescape(url.unwrap_or_default())))
+                }
+                _ => ("", String::new()),
+            };
+            open.push(Open { open: marker, close, emitted: false });
+            continue;
+        }
+        let length = match rest.strip_prefix('&').and_then(|entity| entity.find(';')) {
+            Some(semicolon) => semicolon + 2,
+            None => rest.chars().next().map_or(0, char::len_utf8),
+        };
+        if position >= start {
+            for tag in open.iter_mut().filter(|tag| !tag.emitted) {
+                markdown.push_str(tag.open);
+                tag.emitted = true;
+            }
+            markdown.push_str(&unescape(&rest[..length]));
+        }
+        position += 1;
+        rest = &rest[length..];
+    }
+    for tag in open.iter().rev().filter(|tag| tag.emitted) {
+        markdown.push_str(&tag.close);
+    }
+    markdown
+}
+
 enum Frame {
     Blocks(Vec<Block>),
     Quote(Vec<Block>),
@@ -327,9 +412,55 @@ pub fn render(markdown: &str) -> gtk::Box {
     container
 }
 
+fn collect_selected(widget: &gtk::Widget, parts: &mut Vec<String>) {
+    if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+        if let Some((start, end)) = label.selection_bounds() {
+            let (start, end) = (start as usize, end as usize);
+            parts.push(if label.uses_markup() {
+                selection_markdown(&label.label(), start, end)
+            } else {
+                label.text().chars().skip(start).take(end - start).collect()
+            });
+        }
+        return;
+    }
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        collect_selected(&widget, parts);
+        child = widget.next_sibling();
+    }
+}
+
+/// Markdown for the text selected in the labels under `root`, in order.
+pub fn selected_markdown(root: &impl IsA<gtk::Widget>) -> Option<String> {
+    let mut parts = Vec::new();
+    collect_selected(root.as_ref(), &mut parts);
+    parts.retain(|part| !part.is_empty());
+    (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_keeps_inline_formatting() {
+        let markup = "The critical field is <tt>btree_root</tt>.";
+        assert_eq!(selection_markdown(markup, 0, 33), "The critical field is `btree_root`.");
+        assert_eq!(selection_markdown(markup, 19, 28), "is `btree_`");
+        assert_eq!(selection_markdown(markup, 24, 33), "`ree_root`.");
+        assert_eq!(selection_markdown(markup, 0, 21), "The critical field is");
+        assert_eq!(selection_markdown(markup, 5, 5), "");
+
+        let markup = "é <b>bold <i>both</i></b> a&lt;b <a href=\"https://e.com/?a=1&amp;b=2\">link</a> <s>x</s>";
+        assert_eq!(selection_markdown(markup, 0, 100), "é **bold *both*** a<b [link](https://e.com/?a=1&b=2) ~~x~~");
+        assert_eq!(selection_markdown(markup, 4, 9), "**ld *bo***");
+        assert_eq!(selection_markdown(markup, 12, 17), "a<b [l](https://e.com/?a=1&b=2)");
+        assert_eq!(
+            selection_markdown("<span size=\"large\" weight=\"bold\">Title <tt>x</tt></span>", 0, 7),
+            "Title `x`"
+        );
+    }
 
     #[test]
     fn inline_markup_is_escaped() {

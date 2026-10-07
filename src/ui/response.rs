@@ -179,6 +179,7 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
         });
     }
     response.add_zoom_controls(&scroller);
+    response.add_copy_shortcut();
 
     let weak = Rc::downgrade(&response);
     let send_message = move || {
@@ -426,6 +427,26 @@ impl Response {
             });
             shortcuts.add_shortcut(gtk::Shortcut::new(gtk::ShortcutTrigger::parse_string(trigger), Some(callback)));
         }
+        self.window.add_controller(shortcuts);
+    }
+
+    /// Ctrl+C copies the text selected in the chat as markdown. The labels
+    /// cannot take focus, so their own binding never sees the key.
+    fn add_copy_shortcut(self: &Rc<Self>) {
+        let shortcuts = gtk::ShortcutController::new();
+        // The focused entry would otherwise consume the key first.
+        shortcuts.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(self);
+        let callback = gtk::CallbackAction::new(move |_, _| {
+            let Some(response) = weak.upgrade() else { return glib::Propagation::Proceed };
+            if response.entry.selection_bounds().is_some() {
+                return glib::Propagation::Proceed;
+            }
+            let Some(text) = markdown::selected_markdown(&response.chat) else { return glib::Propagation::Proceed };
+            response.window.clipboard().set_text(&text);
+            glib::Propagation::Stop
+        });
+        shortcuts.add_shortcut(gtk::Shortcut::new(gtk::ShortcutTrigger::parse_string("<Control>c"), Some(callback)));
         self.window.add_controller(shortcuts);
     }
 }
