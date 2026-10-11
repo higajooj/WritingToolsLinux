@@ -90,7 +90,16 @@ fn load_from(path: &Path) -> io::Result<Vec<Entry>> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
-    serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    let mut entries: Vec<Entry> =
+        serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    // GTK cannot display a string holding a NUL; older files may have some.
+    for entry in &mut entries {
+        let fields = [Some(&mut entry.option), Some(&mut entry.text), entry.extra.as_mut(), entry.response.as_mut()];
+        for field in fields.into_iter().flatten() {
+            field.retain(|c| c != '\0');
+        }
+    }
+    Ok(entries)
 }
 
 fn save_to(path: &Path, entries: &[Entry]) -> io::Result<()> {
@@ -129,6 +138,22 @@ mod tests {
         assert_eq!(loaded[1].response, None);
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn loading_strips_nul_characters() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        let mut entries = Vec::new();
+        let id = push(&mut entries, "Re\0write", "bin\0ary\0", Some("ex\0tra"), 0);
+        set_response(&mut entries, id, "re\0ply");
+        save_to(&path, &entries).unwrap();
+
+        let loaded = load_from(&path).unwrap();
+        assert_eq!(loaded[0].option, "Rewrite");
+        assert_eq!(loaded[0].text, "binary");
+        assert_eq!(loaded[0].extra.as_deref(), Some("extra"));
+        assert_eq!(loaded[0].response.as_deref(), Some("reply"));
     }
 
     #[test]

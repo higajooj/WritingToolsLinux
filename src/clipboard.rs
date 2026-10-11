@@ -24,8 +24,9 @@ pub fn read() -> String {
     if !available() {
         return String::new();
     }
+    // Only text: an image or file would otherwise arrive as raw bytes.
     let Ok(mut child) = Command::new("wl-paste")
-        .arg("--no-newline")
+        .args(["--no-newline", "--type", "text"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -42,7 +43,8 @@ pub fn read() -> String {
         return String::new();
     }
     match reader.join() {
-        Ok(Ok(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
+        // GTK cannot display a string holding a NUL.
+        Ok(Ok(bytes)) => String::from_utf8_lossy(&bytes).replace('\0', ""),
         _ => String::new(),
     }
 }
