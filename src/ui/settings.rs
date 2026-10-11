@@ -32,11 +32,21 @@ struct Settings {
     dialog: adw::Dialog,
     providers_only: bool,
     shortcut: Option<adw::EntryRow>,
-    default_row: adw::ComboRow,
+    provider_row: adw::ComboRow,
+    /// The provider used by every button that does not choose its own.
+    default: Cell<ProviderKind>,
     /// Every provider opened so far, so that edits survive switching between them.
-    panels: RefCell<Vec<(ProviderKind, adw::PreferencesGroup, Collector)>>,
+    panels: RefCell<Vec<Panel>>,
     page: adw::PreferencesPage,
     saved: Cell<bool>,
+}
+
+struct Panel {
+    kind: ProviderKind,
+    group: adw::PreferencesGroup,
+    /// "Use as default"; locked on for the default, which only another provider can replace.
+    default: adw::SwitchRow,
+    collect: Collector,
 }
 
 /// Show Settings. With `providers_only` (first run) only the provider is
@@ -60,21 +70,11 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
 
     let names: Vec<&str> = ProviderKind::ALL.iter().map(|kind| kind.name()).collect();
     let current = app.current_kind();
-    let provider_combo = |title: &str, subtitle: &str| {
-        let row = adw::ComboRow::builder()
-            .title(title)
-            .subtitle(subtitle)
-            .subtitle_lines(0)
-            .model(&gtk::StringList::new(&names))
-            .build();
-        row.set_selected(ProviderKind::ALL.iter().position(|kind| *kind == current).unwrap_or(0) as u32);
-        show_full_labels(&row);
-        row
-    };
-    let default_row = provider_combo("Default AI Provider", "Used by every button that does not choose its own.");
-    let provider_row = provider_combo("Set Up Provider", "Each provider keeps its own settings.");
+    let provider_row =
+        adw::ComboRow::builder().title("AI Provider").subtitle_lines(0).model(&gtk::StringList::new(&names)).build();
+    provider_row.set_selected(ProviderKind::ALL.iter().position(|kind| *kind == current).unwrap_or(0) as u32);
+    show_full_labels(&provider_row);
     let group = adw::PreferencesGroup::new();
-    group.add(&default_row);
     group.add(&provider_row);
     page.add(&group);
 
@@ -92,7 +92,8 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
         dialog: dialog.clone(),
         providers_only,
         shortcut,
-        default_row: default_row.clone(),
+        provider_row: provider_row.clone(),
+        default: Cell::new(current),
         panels: RefCell::new(Vec::new()),
         page,
         saved: Cell::new(false),
@@ -102,11 +103,14 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
     let weak = Rc::downgrade(&settings);
     provider_row.connect_selected_notify(move |row| {
         if let Some(settings) = weak.upgrade() {
-            settings.show_provider(ProviderKind::ALL[row.selected() as usize]);
+            let kind = ProviderKind::ALL[row.selected() as usize];
+            // First run sets up a single provider, which is then the default.
+            if settings.providers_only {
+                settings.default.set(kind);
+            }
+            settings.show_provider(kind);
         }
     });
-    // Choosing a default also opens it, as it is the one that has to work.
-    default_row.connect_selected_notify(move |row| provider_row.set_selected(row.selected()));
     let weak = Rc::downgrade(&settings);
     save.connect_clicked(move |button| {
         let Some(settings) = weak.upgrade() else { return };
@@ -130,17 +134,30 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
 }
 
 impl Settings {
-    fn default_kind(&self) -> ProviderKind {
-        ProviderKind::ALL[self.default_row.selected() as usize]
+    /// Reflect the default provider in the provider row and each panel's switch.
+    fn show_default(&self) {
+        let default = self.default.get();
+        if !self.providers_only {
+            self.provider_row.set_subtitle(&format!(
+                "Pick a provider to set it up. Default: {}",
+                glib::markup_escape_text(default.name())
+            ));
+        }
+        for panel in self.panels.borrow().iter() {
+            let is_default = panel.kind == default;
+            panel.default.set_active(is_default);
+            panel.default.set_sensitive(!is_default);
+        }
     }
 
     fn show_provider(self: &Rc<Self>, kind: ProviderKind) {
         let mut known = false;
-        for (panel, group, _) in self.panels.borrow().iter() {
-            group.set_visible(*panel == kind);
-            known |= *panel == kind;
+        for panel in self.panels.borrow().iter() {
+            panel.group.set_visible(panel.kind == kind);
+            known |= panel.kind == kind;
         }
         if known {
+            self.show_default();
             return;
         }
         let group = adw::PreferencesGroup::builder().title(kind.name()).description(kind.description()).build();
@@ -149,6 +166,20 @@ impl Settings {
             image.set_pixel_size(30);
             group.set_header_suffix(Some(&image));
         }
+        let default = adw::SwitchRow::builder()
+            .title("Use as default")
+            .subtitle("For typed changes and every button that does not choose its own provider.")
+            .subtitle_lines(0)
+            .visible(!self.providers_only)
+            .build();
+        let weak = Rc::downgrade(self);
+        default.connect_active_notify(move |row| {
+            if let Some(settings) = weak.upgrade().filter(|_| row.is_active()) {
+                settings.default.set(kind);
+                settings.show_default();
+            }
+        });
+        group.add(&default);
         if let Some((label, url)) = kind.link() {
             let row = adw::ActionRow::builder().title(label).activatable(true).build();
             row.add_suffix(&gtk::Image::from_icon_name("adw-external-link-symbolic"));
@@ -162,11 +193,12 @@ impl Settings {
             _ => generic_rows(&group, kind.settings(), &config, kind == ProviderKind::OpenAiCompatible),
         };
         self.page.add(&group);
-        self.panels.borrow_mut().push((kind, group, collector));
+        self.panels.borrow_mut().push(Panel { kind, group, default, collect: collector });
+        self.show_default();
     }
 
     async fn save(self: &Rc<Self>) {
-        let kind = self.default_kind();
+        let kind = self.default.get();
         let validation = match kind {
             ProviderKind::Subscription => self.app.subscription.validate().await,
             _ => Ok(()),
@@ -192,8 +224,8 @@ impl Settings {
                 config.shortcut = Some(shortcut);
             }
             config.provider = Some(kind.name().to_owned());
-            for (panel, _, collect) in self.panels.borrow().iter() {
-                config.providers.insert(panel.name().to_owned(), Value::Object(collect()));
+            for panel in self.panels.borrow().iter() {
+                config.providers.insert(panel.kind.name().to_owned(), Value::Object((panel.collect)()));
             }
         }
         self.app.save_config();

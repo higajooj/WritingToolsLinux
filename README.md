@@ -147,9 +147,9 @@ that window. Text is sent to the provider you
 configure when you invoke writing actions; local providers can keep processing
 on your machine.
 
-Settings holds every provider side by side. **Set Up Provider** chooses which
-one you are editing, and **Default AI Provider** chooses the one used by typed
-changes and by every button that does not pick its own. To give a button its
+Settings holds every provider side by side. **AI Provider** chooses which one
+you are setting up, and its **Use as default** switch makes it the one used by
+typed changes and by every button that does not pick its own. To give a button its
 own provider or model, edit it from the popup and fill in **AI provider and
 model**; a blank model uses the one set for that provider in Settings.
 Follow-up questions in a response window stay on the button's provider and
