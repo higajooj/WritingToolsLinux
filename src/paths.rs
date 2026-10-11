@@ -1,6 +1,7 @@
 //! Filesystem locations used by Writing Tools.
 
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 /// Portal / desktop-entry application ID, also the GApplication ID.
 pub const APP_ID: &str = "com.writingtools.WritingTools";
@@ -42,6 +43,22 @@ pub fn codex_data_root() -> PathBuf {
     data_home().join(APP_ID).join("codex")
 }
 
+/// Every past use, with the text it was applied to.
+pub fn history_path() -> PathBuf {
+    data_home().join(APP_ID).join("history.json")
+}
+
+/// Write a file only its owner can read.
+pub fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    // `mode` only applies when the file is created; tighten an existing one too.
+    use std::os::unix::fs::PermissionsExt;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    file.write_all(bytes)
+}
+
 #[cfg(test)]
 pub(crate) mod test_env {
     use std::sync::{Mutex, MutexGuard};
@@ -67,7 +84,6 @@ pub(crate) mod test_env {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn absolute_xdg_values_are_used() {
@@ -77,6 +93,7 @@ mod tests {
         assert_eq!(data_home(), PathBuf::from("/tmp/data"));
         assert_eq!(options_path(), PathBuf::from("/tmp/config/writing-tools/options.json"));
         assert_eq!(codex_data_root(), PathBuf::from("/tmp/data/com.writingtools.WritingTools/codex"));
+        assert_eq!(history_path(), PathBuf::from("/tmp/data/com.writingtools.WritingTools/history.json"));
     }
 
     #[test]

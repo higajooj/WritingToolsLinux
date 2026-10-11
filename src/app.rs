@@ -11,6 +11,7 @@ use futures_util::future::{BoxFuture, Shared};
 use gtk::glib;
 
 use crate::config::{self, Config};
+use crate::history;
 use crate::options::{self, Options};
 use crate::portal::{self, PortalEvent, ShortcutPortal};
 use crate::prompt;
@@ -36,6 +37,8 @@ pub struct App {
     _hold: gtk::gio::ApplicationHoldGuard,
     pub config: RefCell<Config>,
     pub options: RefCell<Options>,
+    /// Past uses, oldest first.
+    pub history: RefCell<Vec<history::Entry>>,
     provider: RefCell<Option<Arc<dyn Provider>>>,
     pub subscription: Arc<Subscription>,
     triggers: RefCell<Vec<Instant>>,
@@ -76,6 +79,10 @@ impl App {
             );
             options::defaults()
         });
+        let history = history::load().unwrap_or_else(|e| {
+            log::error!("Could not load {}: {e}", paths::history_path().display());
+            Vec::new()
+        });
 
         let (portal_events, portal_receiver) = async_channel::unbounded();
         let app = Rc::new(Self {
@@ -83,6 +90,7 @@ impl App {
             _hold: gtk_app.hold(),
             config: RefCell::new(config.unwrap_or_default()),
             options: RefCell::new(options),
+            history: RefCell::new(history),
             provider: RefCell::new(None),
             subscription: Subscription::new(codex::CodexClient::new(paths::codex_data_root())),
             triggers: RefCell::new(Vec::new()),
@@ -160,6 +168,33 @@ impl App {
     pub fn flush_config(&self) {
         if self.config_save_timer.borrow().is_some() {
             self.save_config();
+        }
+    }
+
+    // --------------------------------------------------------------- history
+
+    /// Remember a use of `option` on `text`. Returns the id for its response.
+    fn record_history(&self, option: &str, text: &str, extra: Option<&str>) -> u64 {
+        let id = history::push(&mut self.history.borrow_mut(), option, text, extra, history::now());
+        self.save_history();
+        id
+    }
+
+    pub fn record_response(&self, id: u64, response: &str) {
+        if history::set_response(&mut self.history.borrow_mut(), id, response) {
+            self.save_history();
+        }
+    }
+
+    pub fn clear_history(&self) {
+        self.history.borrow_mut().clear();
+        self.save_history();
+    }
+
+    /// History is a convenience: a failed save must not interrupt an action.
+    fn save_history(&self) {
+        if let Err(e) = history::save(&self.history.borrow()) {
+            log::error!("Could not save {}: {e}", paths::history_path().display());
         }
     }
 
@@ -320,9 +355,10 @@ impl App {
             };
             let system = prompt::build_system_instruction(&name, &option, extra.as_deref());
             let user_prompt = prompt::build_option_prompt(&name, &option, &text, extra.as_deref());
+            let record = app.record_history(&name, &text, extra.as_deref());
 
             if option.open_in_window {
-                ui::response::open(&app, &name, &text, extra.as_deref(), user_prompt, system);
+                ui::response::open(&app, &name, &text, extra.as_deref(), user_prompt, system, record);
                 return;
             }
 
@@ -333,7 +369,10 @@ impl App {
                 // Cancelled by a new hotkey press: drop it silently.
                 Err(_) => {}
                 Ok(Err(error)) => app.show_provider_error(&error),
-                Ok(Ok(response)) => app.handle_output(response).await,
+                Ok(Ok(response)) => {
+                    app.record_response(record, &response);
+                    app.handle_output(response).await
+                }
             }
         });
     }

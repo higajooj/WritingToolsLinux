@@ -78,8 +78,16 @@ struct Response {
 }
 
 /// Open a window for `option`, show the user's instructions and text, and run
-/// the request.
-pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str>, prompt: String, system: String) {
+/// the request. The first reply is saved to the history entry `record`.
+pub fn open(
+    app: &Rc<App>,
+    option: &str,
+    selected_text: &str,
+    extra: Option<&str>,
+    prompt: String,
+    system: String,
+    record: u64,
+) {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let css_name = format!("response-chat-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
 
@@ -223,6 +231,7 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
         match result {
             Ok(text) if !text.trim().is_empty() => {
                 response.history.borrow_mut().push(Message::assistant(text.clone()));
+                response.app.record_response(record, &text);
                 response.add_assistant_message(&text);
             }
             Ok(_) => response.add_note("The AI returned an empty response. Please try again."),

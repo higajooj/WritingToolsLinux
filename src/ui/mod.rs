@@ -1,5 +1,6 @@
 pub mod about;
 pub mod button_dialog;
+pub mod history;
 pub mod onboarding;
 pub mod popup;
 pub mod response;

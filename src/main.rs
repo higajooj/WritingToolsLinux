@@ -2,6 +2,7 @@ mod app;
 mod clipboard;
 mod codex;
 mod config;
+mod history;
 mod icons;
 mod markdown;
 mod obfuscate;

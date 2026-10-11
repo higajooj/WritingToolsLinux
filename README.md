@@ -137,7 +137,11 @@ Settings, including provider credentials, are stored in
 `~/.config/writing-tools/config.json` (under `$XDG_CONFIG_HOME` when set),
 readable only by you. Keep it private. Custom buttons and their shortcuts are
 stored beside it in `options.json`, which is created from the bundled defaults
-on first launch. Text is sent to the provider you
+on first launch. The history button in the popup lists your last 200 uses with
+the text they were applied to and the first reply; they are kept in
+`~/.local/share/com.writingtools.WritingTools/history.json` (under
+`$XDG_DATA_HOME` when set), readable only by you, until you clear them from
+that window. Text is sent to the provider you
 configure when you invoke writing actions; local providers can keep processing
 on your machine.
 

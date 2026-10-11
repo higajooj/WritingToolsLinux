@@ -51,6 +51,7 @@ struct Popup {
     add_button: gtk::Button,
     edit_button: gtk::Button,
     reset_button: gtk::Button,
+    history_button: gtk::Button,
     close_button: gtk::Button,
     drag_label: gtk::Label,
     shortcuts: gtk::ShortcutController,
@@ -81,10 +82,11 @@ pub fn show(app: &Rc<App>) -> gtk::Window {
     spacer.set_hexpand(true);
     let reset_button = icons::button("restore", 16, "Reset to defaults");
     reset_button.set_visible(false);
+    let history_button = icons::button("history", 16, "History");
     let close_button = gtk::Button::with_label("×");
     close_button.set_tooltip_text(Some("Close"));
     close_button.add_css_class("popup-close");
-    for button in [&edit_button, &reset_button, &close_button] {
+    for button in [&edit_button, &reset_button, &history_button, &close_button] {
         button.add_css_class("flat");
         button.add_css_class("popup-bar-button");
     }
@@ -93,6 +95,7 @@ pub fn show(app: &Rc<App>) -> gtk::Window {
     top_bar.append(&drag_label);
     top_bar.append(&spacer);
     top_bar.append(&reset_button);
+    top_bar.append(&history_button);
     top_bar.append(&close_button);
     content.append(&top_bar);
 
@@ -124,6 +127,7 @@ pub fn show(app: &Rc<App>) -> gtk::Window {
         add_button: add_button.clone(),
         edit_button: edit_button.clone(),
         reset_button: reset_button.clone(),
+        history_button: history_button.clone(),
         close_button: close_button.clone(),
         drag_label,
         shortcuts,
@@ -151,6 +155,7 @@ pub fn show(app: &Rc<App>) -> gtk::Window {
     };
     edit_button.connect_clicked(with(Popup::toggle_edit_mode));
     reset_button.connect_clicked(with(Popup::confirm_reset));
+    history_button.connect_clicked(with(Popup::open_history));
     add_button.connect_clicked(with(Popup::add_button_clicked));
     send.connect_clicked(with(Popup::submit));
     close_button.connect_clicked({
@@ -384,6 +389,12 @@ impl Popup {
         }
     }
 
+    /// The history window is its own toplevel, so the popup can go.
+    fn open_history(self: &Rc<Self>) {
+        super::history::open(&self.app);
+        self.window.close();
+    }
+
     // ------------------------------------------------------------ edit mode
 
     fn toggle_edit_mode(self: &Rc<Self>) {
@@ -394,6 +405,7 @@ impl Popup {
         }
         self.edit_button.set_child(Some(&icons::image(if editing { "check" } else { "pencil" }, 16)));
         self.edit_button.set_tooltip_text(Some(if editing { "Done" } else { "Edit buttons" }));
+        self.history_button.set_visible(!editing);
         self.close_button.set_visible(!editing);
         self.reset_button.set_visible(editing);
         self.drag_label.set_visible(editing);

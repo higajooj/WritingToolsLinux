@@ -65,17 +65,7 @@ fn save_to(path: &Path, config: &Config) -> io::Result<()> {
     }
     let text = serde_json::to_string_pretty(config).map_err(io::Error::other)?;
     // The file holds provider credentials.
-    write_private(path, text.as_bytes())
-}
-
-fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
-    // `mode` only applies when the file is created; tighten an existing one too.
-    use std::os::unix::fs::PermissionsExt;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    file.write_all(bytes)
+    paths::write_private(path, text.as_bytes())
 }
 
 #[cfg(test)]

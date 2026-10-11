@@ -26,6 +26,7 @@ fn source(name: &str) -> Option<&'static [u8]> {
         "copy",
         "cross",
         "custom",
+        "history",
         "keypoints",
         "list",
         "magnifying-glass",

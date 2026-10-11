@@ -73,6 +73,11 @@ window.popup {
   padding: 12px;
 }
 
+/* History window */
+.history-row {
+  padding: 10px 12px;
+}
+
 .md-code {
   background-color: alpha(currentColor, 0.07);
   border-radius: 6px;
