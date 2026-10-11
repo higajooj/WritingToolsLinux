@@ -147,7 +147,13 @@ pub fn open(
     initial: Option<(&str, &OptionEntry)>,
     accept: impl Fn(ButtonData) -> Result<(), (String, String)> + 'static,
 ) {
-    let dialog = adw::Window::builder().title(title).modal(true).transient_for(parent).default_width(520).build();
+    let dialog = adw::Window::builder()
+        .title(title)
+        .modal(true)
+        .transient_for(parent)
+        .default_width(1000)
+        .default_height(700)
+        .build();
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
     content.set_margin_top(12);

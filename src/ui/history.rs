@@ -32,8 +32,8 @@ pub fn open(app: &Rc<App>) {
     let window = adw::ApplicationWindow::builder()
         .application(&app.gtk)
         .title("History")
-        .default_width(600)
-        .default_height(600)
+        .default_width(1000)
+        .default_height(700)
         .width_request(400)
         .height_request(300)
         .build();
