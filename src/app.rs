@@ -399,9 +399,9 @@ impl App {
                 // Cancelled by a new hotkey press: drop it silently.
                 Err(_) => {}
                 Ok(Err(error)) => app.show_provider_error(&error),
-                Ok(Ok(response)) => {
-                    app.record_response(record, &response);
-                    app.handle_output(response).await
+                Ok(Ok(reply)) => {
+                    app.record_response(record, &reply.text);
+                    app.handle_output(reply.text).await
                 }
             }
         });

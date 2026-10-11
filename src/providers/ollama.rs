@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{Prompt, Provider, ProviderError, SettingSpec, error_detail, http};
+use super::{Prompt, Provider, ProviderError, Reply, SettingSpec, Usage, error_detail, http};
 
 pub fn settings() -> Vec<SettingSpec> {
     vec![
@@ -35,9 +35,18 @@ impl Ollama {
     }
 }
 
+/// The token counts of a response; a local model has no price.
+pub fn usage(body: &Value) -> Option<Usage> {
+    Some(Usage {
+        input_tokens: body.get("prompt_eval_count")?.as_u64()?,
+        output_tokens: body.get("eval_count")?.as_u64()?,
+        cost: None,
+    })
+}
+
 #[async_trait]
 impl Provider for Ollama {
-    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<String, ProviderError> {
+    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<Reply, ProviderError> {
         let error = |message: String| {
             ProviderError::new("Ollama Error", format!("An error occurred during Ollama chat: {message}"))
         };
@@ -54,10 +63,12 @@ impl Provider for Ollama {
             return Err(error(error_detail(status, &text)));
         }
         let body: Value = serde_json::from_str(&text).map_err(|e| error(format!("Invalid response: {e}")))?;
-        body.pointer("/message/content")
+        let text = body
+            .pointer("/message/content")
             .and_then(Value::as_str)
             .map(|content| content.trim().to_owned())
-            .ok_or_else(|| error("The server returned no message.".into()))
+            .ok_or_else(|| error("The server returned no message.".into()))?;
+        Ok(Reply { text, usage: usage(&body) })
     }
 }
 
@@ -79,5 +90,12 @@ mod tests {
         assert_eq!(provider.request_body("s", &prompt)["keep_alive"], "1h");
         provider.keep_alive = " ".into();
         assert!(provider.request_body("s", &prompt).get("keep_alive").is_none());
+    }
+
+    #[test]
+    fn reads_token_counts() {
+        let body = json!({"message": {"content": "hi"}, "prompt_eval_count": 7, "eval_count": 3});
+        assert_eq!(usage(&body), Some(Usage { input_tokens: 7, output_tokens: 3, cost: None }));
+        assert_eq!(usage(&json!({"message": {"content": "hi"}})), None);
     }
 }

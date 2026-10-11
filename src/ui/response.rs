@@ -11,7 +11,7 @@ use gtk::{gdk, glib};
 
 use crate::app::{App, show_message};
 use crate::prompt::FOLLOWUP_SYSTEM_INSTRUCTION;
-use crate::providers::{Message, Prompt, Provider, ProviderError};
+use crate::providers::{Cost, Message, Prompt, Provider, ProviderError, Reply, Usage};
 use crate::{icons, markdown, runtime};
 
 pub const DEFAULT_ZOOM: f64 = 1.2;
@@ -58,6 +58,68 @@ fn format_elapsed(elapsed: Duration, precise: bool) -> String {
     }
 }
 
+fn format_cost(dollars: f64) -> String {
+    match dollars {
+        d if d <= 0.0 => "$0.00".to_owned(),
+        d if d < 0.0001 => "<$0.0001".to_owned(),
+        d if d < 0.01 => format!("${d:.4}"),
+        d if d < 1.0 => format!("${d:.3}"),
+        d => format!("${d:.2}"),
+    }
+}
+
+/// A token count in little room: 980, 4.2k, 1.3M.
+fn format_tokens(tokens: u64) -> String {
+    match tokens {
+        0..1_000 => tokens.to_string(),
+        1_000..1_000_000 => format!("{:.1}k", tokens as f64 / 1e3),
+        _ => format!("{:.1}M", tokens as f64 / 1e6),
+    }
+}
+
+/// A number with thousands separators.
+fn grouped(number: u64) -> String {
+    let digits = number.to_string();
+    let mut grouped = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
+/// The total of a chat's requests as a label and its tooltip: the cost when
+/// every request has one, otherwise the tokens.
+fn format_usage(requests: &[Usage]) -> Option<(String, String)> {
+    if requests.is_empty() {
+        return None;
+    }
+    let input: u64 = requests.iter().map(|usage| usage.input_tokens).sum();
+    let output: u64 = requests.iter().map(|usage| usage.output_tokens).sum();
+    let cost = requests.iter().try_fold(0.0, |total, usage| match usage.cost? {
+        Cost::Exact(cost) | Cost::Estimated(cost) => Some(total + cost),
+    });
+    let estimated = requests.iter().any(|usage| matches!(usage.cost, Some(Cost::Estimated(_))));
+    let label = match cost {
+        Some(cost) if estimated => format!("~{}", format_cost(cost)),
+        Some(cost) => format_cost(cost),
+        None => format!("{} in · {} out", format_tokens(input), format_tokens(output)),
+    };
+    let count = requests.len();
+    let mut tooltip = format!(
+        "This chat: {count} request{}\n{} input tokens · {} output tokens",
+        if count == 1 { "" } else { "s" },
+        grouped(input),
+        grouped(output)
+    );
+    if cost.is_some() && estimated {
+        tooltip.push_str("\nCost estimated from OpenRouter list prices");
+    }
+    Some((label, tooltip))
+}
+
 fn user_label(text: &str, css_class: &str) -> gtk::Label {
     let label = gtk::Label::new(Some(text));
     label.set_wrap(true);
@@ -80,6 +142,10 @@ struct Response {
     scroller: gtk::ScrolledWindow,
     entry: gtk::Entry,
     thinking: gtk::Label,
+    /// What the chat has cost so far, above the follow-up entry.
+    cost: gtk::Label,
+    /// The usage of each request that reported one.
+    usage: RefCell<Vec<Usage>>,
     css: gtk::CssProvider,
     css_name: String,
     zoom: Cell<f64>,
@@ -146,6 +212,12 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
     let scroller =
         gtk::ScrolledWindow::builder().child(&chat).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
 
+    let cost = gtk::Label::builder().xalign(0.0).visible(false).build();
+    cost.add_css_class("dim-label");
+    cost.add_css_class("caption");
+    cost.set_margin_start(21);
+    cost.set_margin_bottom(6);
+
     let entry = gtk::Entry::builder().placeholder_text(FOLLOWUP_PLACEHOLDER).hexpand(true).sensitive(false).build();
     let send = icons::button("send", 16, "Send");
     send.add_css_class("suggested-action");
@@ -159,6 +231,7 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
     let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
     body.append(&thinking);
     body.append(&scroller);
+    body.append(&cost);
     body.append(&bottom);
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&body));
@@ -183,6 +256,8 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
         scroller: scroller.clone(),
         entry: entry.clone(),
         thinking,
+        cost,
+        usage: RefCell::new(Vec::new()),
         css,
         css_name,
         zoom: Cell::new(sanitize_zoom(app.config.borrow().response_window_zoom)),
@@ -254,7 +329,7 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
     response.run(system, Prompt::Single(prompt), move |result| {
         let Some(response) = weak.upgrade() else { return };
         response.stop_thinking();
-        match result {
+        match response.count_usage(result) {
             Ok(text) if !text.trim().is_empty() => {
                 response.history.borrow_mut().push(Message::assistant(text.clone()));
                 response.app.record_response(record, &text);
@@ -272,7 +347,7 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
 impl Response {
     /// Run a request, delivering the result on the GTK thread. Closing the
     /// window aborts it.
-    fn run(&self, system: String, prompt: Prompt, done: impl FnOnce(Result<String, ProviderError>) + 'static) {
+    fn run(&self, system: String, prompt: Prompt, done: impl FnOnce(Result<Reply, ProviderError>) + 'static) {
         let provider = self.provider.clone();
         let job = runtime::spawn(async move { provider.respond(&system, prompt).await });
         self.request.replace(Some(job.abort_handle()));
@@ -281,6 +356,20 @@ impl Response {
                 done(result);
             }
         });
+    }
+
+    /// Add a reply's usage to the chat's total, and hand back its text.
+    fn count_usage(&self, result: Result<Reply, ProviderError>) -> Result<String, ProviderError> {
+        let reply = result?;
+        if let Some(usage) = reply.usage {
+            self.usage.borrow_mut().push(usage);
+            if let Some((label, tooltip)) = format_usage(&self.usage.borrow()) {
+                self.cost.set_label(&label);
+                self.cost.set_tooltip_text(Some(&tooltip));
+                self.cost.set_visible(true);
+            }
+        }
+        Ok(reply.text)
     }
 
     fn send_followup(self: &Rc<Self>) {
@@ -298,7 +387,7 @@ impl Response {
         self.run(FOLLOWUP_SYSTEM_INSTRUCTION.to_owned(), Prompt::Chat(history), move |result| {
             let Some(response) = weak.upgrade() else { return };
             response.stop_thinking();
-            match result {
+            match response.count_usage(result) {
                 Ok(text) if !text.trim().is_empty() => {
                     response.history.borrow_mut().push(Message::assistant(text.clone()));
                     response.add_assistant_message(&text);
@@ -510,6 +599,42 @@ mod tests {
         assert_eq!(next_zoom(MIN_ZOOM, Zoom::Out), MIN_ZOOM);
         assert!((next_zoom(1.0, Zoom::In) - 1.1).abs() < 1e-9);
         assert_eq!(next_zoom(2.0, Zoom::Reset), DEFAULT_ZOOM);
+    }
+
+    #[test]
+    fn costs_and_token_counts() {
+        assert_eq!(format_cost(0.0), "$0.00");
+        assert_eq!(format_cost(0.00002), "<$0.0001");
+        assert_eq!(format_cost(0.00214), "$0.0021");
+        assert_eq!(format_cost(0.0581), "$0.058");
+        assert_eq!(format_cost(1.239), "$1.24");
+        assert_eq!(format_tokens(980), "980");
+        assert_eq!(format_tokens(4210), "4.2k");
+        assert_eq!(format_tokens(1_250_000), "1.2M");
+        assert_eq!(grouped(980), "980");
+        assert_eq!(grouped(4210), "4,210");
+        assert_eq!(grouped(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn chat_totals() {
+        let usage = |cost| Usage { input_tokens: 2000, output_tokens: 400, cost };
+        assert_eq!(format_usage(&[]), None);
+
+        let (label, tooltip) = format_usage(&[usage(Some(Cost::Exact(0.002)))]).unwrap();
+        assert_eq!(label, "$0.0020");
+        assert_eq!(tooltip, "This chat: 1 request\n2,000 input tokens · 400 output tokens");
+
+        let exact = usage(Some(Cost::Exact(0.002)));
+        let (label, tooltip) = format_usage(&[exact, usage(Some(Cost::Estimated(0.003)))]).unwrap();
+        assert_eq!(label, "~$0.0050");
+        assert!(tooltip.starts_with("This chat: 2 requests\n4,000 input tokens · 800 output tokens\n"));
+        assert!(tooltip.ends_with("estimated from OpenRouter list prices"));
+
+        // One unpriced request leaves the total unknown.
+        let (label, tooltip) = format_usage(&[exact, usage(None)]).unwrap();
+        assert_eq!(label, "4.0k in · 800 out");
+        assert!(!tooltip.contains("estimated"));
     }
 
     #[test]

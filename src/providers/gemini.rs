@@ -3,7 +3,8 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{Prompt, Provider, ProviderError, Role, SettingKind, SettingSpec, error_detail, http};
+use super::{Prompt, Provider, ProviderError, Reply, Role, SettingKind, SettingSpec, Usage, error_detail, http};
+use crate::pricing;
 
 pub const DEFAULT_MODEL: &str = "gemini-flash-latest";
 
@@ -90,13 +91,25 @@ pub fn response_text(body: &Value) -> Option<String> {
     Some(text.trim_end_matches('\n').to_owned())
 }
 
+/// The token counts of a response. Thinking is billed as output.
+pub fn usage(body: &Value) -> Option<Usage> {
+    let usage = body.get("usageMetadata")?;
+    let count = |key: &str| usage.get(key).and_then(Value::as_u64);
+    Some(Usage {
+        input_tokens: count("promptTokenCount")?,
+        output_tokens: count("candidatesTokenCount").unwrap_or(0) + count("thoughtsTokenCount").unwrap_or(0),
+        cost: None,
+    })
+}
+
 #[async_trait]
 impl Provider for Gemini {
-    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<String, ProviderError> {
+    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<Reply, ProviderError> {
         let error = |message: String| ProviderError::new("Gemini Error", message);
         if self.api_key.is_empty() {
             return Err(error("Add your Gemini API key in Settings.".into()));
         }
+        pricing::prefetch();
         let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent", self.model);
         let response = http()
             .post(url)
@@ -115,7 +128,13 @@ impl Provider for Gemini {
         }
         let body: Value = serde_json::from_str(&text).map_err(|e| error(format!("Invalid response: {e}")))?;
         match response_text(&body) {
-            Some(text) => Ok(text),
+            Some(text) => {
+                let usage = match usage(&body) {
+                    Some(usage) => Some(usage.estimated(&format!("google/{}", self.model.trim())).await),
+                    None => None,
+                };
+                Ok(Reply { text, usage })
+            }
             None => {
                 let reason = body
                     .pointer("/promptFeedback/blockReason")
@@ -162,5 +181,13 @@ mod tests {
         ]}}]});
         assert_eq!(response_text(&body).as_deref(), Some("Hello world"));
         assert_eq!(response_text(&json!({"promptFeedback": {"blockReason": "SAFETY"}})), None);
+    }
+
+    #[test]
+    fn counts_thinking_as_output() {
+        let body =
+            json!({"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "thoughtsTokenCount": 5}});
+        assert_eq!(usage(&body), Some(Usage { input_tokens: 10, output_tokens: 25, cost: None }));
+        assert_eq!(usage(&json!({"candidates": []})), None);
     }
 }

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 use tokio::sync::watch;
 
-use super::{Prompt, Provider, ProviderError, normalize_service_tier};
+use super::{Prompt, Provider, ProviderError, Reply, normalize_service_tier};
 use crate::codex::{CodexClient, CodexError, METHOD_NOT_FOUND, Notification, TurnRequest};
 use crate::runtime;
 
@@ -688,7 +688,7 @@ pub struct SubscriptionProvider {
 
 #[async_trait]
 impl Provider for SubscriptionProvider {
-    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<String, ProviderError> {
+    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<Reply, ProviderError> {
         let this = &self.subscription;
         let prepare = async {
             this.ensure_authenticated().await?;
@@ -718,7 +718,8 @@ impl Provider for SubscriptionProvider {
             .await;
         // The turn finished (or failed) on its own; nothing to interrupt.
         guard.turn = None;
-        result.map_err(|e| this.turn_error(e))
+        // The plan is flat-rate, so there is no usage to report.
+        result.map(|text| Reply { text, usage: None }).map_err(|e| this.turn_error(e))
     }
 }
 
@@ -820,7 +821,7 @@ mod tests {
         server
             .send(json!({"method": "turn/completed", "params": {"threadId": "t", "turn": {"status": "completed", "items": [{"type": "agentMessage", "text": "ok"}]}}}))
             .await;
-        assert_eq!(call.await.unwrap(), Ok("ok".into()));
+        assert_eq!(call.await.unwrap().map(|reply| reply.text), Ok("ok".into()));
         assert_eq!(sub.choices().model, "");
         assert_eq!(sub.choices().reasoning_effort, "high");
     }
@@ -847,7 +848,7 @@ mod tests {
         assert!(thread["params"].get("config").is_none());
         server.expect("turn/start", json!({"turn": {"id": "u"}})).await;
         server.send(completed.clone()).await;
-        assert_eq!(call.await.unwrap(), Ok("ok".into()));
+        assert_eq!(call.await.unwrap().map(|reply| reply.text), Ok("ok".into()));
         assert_eq!(sub.choices(), saved);
 
         // An unavailable model falls back to Automatic.
@@ -857,7 +858,7 @@ mod tests {
         assert_eq!(thread["params"]["config"]["model_reasoning_effort"], "high");
         server.expect("turn/start", json!({"turn": {"id": "u"}})).await;
         server.send(completed).await;
-        assert_eq!(call.await.unwrap(), Ok("ok".into()));
+        assert_eq!(call.await.unwrap().map(|reply| reply.text), Ok("ok".into()));
         assert_eq!(sub.choices(), saved);
     }
 

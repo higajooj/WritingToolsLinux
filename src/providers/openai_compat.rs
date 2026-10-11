@@ -3,7 +3,11 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{Prompt, Provider, ProviderError, SPEED_OPTIONS, SettingKind, SettingSpec, error_detail, http};
+use super::{
+    Cost, Prompt, Provider, ProviderError, Reply, SPEED_OPTIONS, SettingKind, SettingSpec, Usage, error_detail, http,
+    openrouter,
+};
+use crate::pricing;
 
 pub fn settings() -> Vec<SettingSpec> {
     vec![
@@ -68,13 +72,28 @@ impl OpenAiCompatible {
         if self.service_tier == SPEED_OPTIONS[1].1 && is_openai_api(&self.api_base) {
             body["service_tier"] = json!("priority");
         }
+        // OpenRouter then reports what the request cost.
+        if self.api_base == openrouter::API_BASE {
+            body["usage"] = json!({"include": true});
+        }
         body
     }
 }
 
+/// The token counts of a response, and the cost when the server reports one,
+/// as OpenRouter does.
+pub fn usage(body: &Value) -> Option<Usage> {
+    let usage = body.get("usage")?;
+    Some(Usage {
+        input_tokens: usage.get("prompt_tokens")?.as_u64()?,
+        output_tokens: usage.get("completion_tokens")?.as_u64()?,
+        cost: usage.get("cost").and_then(Value::as_f64).map(Cost::Exact),
+    })
+}
+
 #[async_trait]
 impl Provider for OpenAiCompatible {
-    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<String, ProviderError> {
+    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<Reply, ProviderError> {
         let error = |message: String| {
             let lower = message.to_lowercase();
             if lower.contains("exceeded") || lower.contains("rate limit") {
@@ -86,6 +105,11 @@ impl Provider for OpenAiCompatible {
                 ProviderError::new("Error", format!("An error occurred: {message}"))
             }
         };
+        // Only the official API is known to charge OpenAI's list prices.
+        let priced = is_openai_api(&self.api_base);
+        if priced {
+            pricing::prefetch();
+        }
         let mut request = http().post(self.endpoint()).json(&self.request_body(system_instruction, &prompt));
         if !self.api_key.is_empty() {
             request = request.bearer_auth(&self.api_key);
@@ -106,10 +130,16 @@ impl Provider for OpenAiCompatible {
             return Err(error(error_detail(status, &text)));
         }
         let body: Value = serde_json::from_str(&text).map_err(|e| error(format!("Invalid response: {e}")))?;
-        body.pointer("/choices/0/message/content")
+        let text = body
+            .pointer("/choices/0/message/content")
             .and_then(Value::as_str)
             .map(|content| content.trim().to_owned())
-            .ok_or_else(|| error("The server returned no message.".into()))
+            .ok_or_else(|| error("The server returned no message.".into()))?;
+        let usage = match usage(&body) {
+            Some(usage) if priced => Some(usage.estimated(&format!("openai/{}", self.model.trim())).await),
+            usage => usage,
+        };
+        Ok(Reply { text, usage })
     }
 }
 
@@ -162,6 +192,22 @@ mod tests {
         assert!(
             provider("http://localhost:8080/v1", "priority").request_body("s", &prompt).get("service_tier").is_none()
         );
+    }
+
+    #[test]
+    fn asks_only_openrouter_for_the_cost() {
+        let prompt = Prompt::Single("hi".into());
+        assert_eq!(provider(openrouter::API_BASE, "default").request_body("s", &prompt)["usage"]["include"], true);
+        assert!(provider("https://api.openai.com/v1", "default").request_body("s", &prompt).get("usage").is_none());
+    }
+
+    #[test]
+    fn reads_usage_and_reported_cost() {
+        let body = json!({"usage": {"prompt_tokens": 12, "completion_tokens": 34, "cost": 0.0021}});
+        assert_eq!(usage(&body), Some(Usage { input_tokens: 12, output_tokens: 34, cost: Some(Cost::Exact(0.0021)) }));
+        let body = json!({"usage": {"prompt_tokens": 12, "completion_tokens": 34}});
+        assert_eq!(usage(&body), Some(Usage { input_tokens: 12, output_tokens: 34, cost: None }));
+        assert_eq!(usage(&json!({"choices": []})), None);
     }
 
     #[test]

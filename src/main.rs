@@ -9,6 +9,7 @@ mod obfuscate;
 mod options;
 mod paths;
 mod portal;
+mod pricing;
 mod prompt;
 mod providers;
 mod runtime;

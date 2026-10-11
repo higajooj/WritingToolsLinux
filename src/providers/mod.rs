@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::obfuscate;
+use crate::{obfuscate, pricing};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -71,9 +71,44 @@ impl ProviderError {
     }
 }
 
+/// What a request cost, in US dollars.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Cost {
+    /// Reported by the provider.
+    Exact(f64),
+    /// Token counts multiplied by list prices.
+    Estimated(f64),
+}
+
+/// The tokens one request used, and their cost when it is known.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cost: Option<Cost>,
+}
+
+impl Usage {
+    /// Price the tokens from the list prices of `model`, an OpenRouter model
+    /// ID, unless the provider already reported a cost.
+    pub async fn estimated(mut self, model: &str) -> Self {
+        if self.cost.is_none() {
+            self.cost = pricing::estimate(model, self.input_tokens, self.output_tokens).await.map(Cost::Estimated);
+        }
+        self
+    }
+}
+
+/// A provider's answer, with the usage when the provider reports it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reply {
+    pub text: String,
+    pub usage: Option<Usage>,
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
-    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<String, ProviderError>;
+    async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<Reply, ProviderError>;
 }
 
 /// Shared HTTP client for all HTTP providers.
