@@ -64,7 +64,7 @@ struct Popup {
 pub fn show(app: &Rc<App>) -> gtk::Window {
     // Wayland cannot position windows; placement is up to the compositor,
     // matched by this title (see README window rules).
-    let window = gtk::Window::builder().application(&app.gtk).title(TITLE).decorated(false).resizable(false).build();
+    let window = gtk::Window::builder().application(&app.gtk).title(TITLE).decorated(false).build();
     window.add_css_class("popup");
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
@@ -229,6 +229,7 @@ impl Popup {
             let button = self.option_button(&name, entry);
             let widget: gtk::Widget =
                 if self.edit_mode.get() { self.edit_overlay(&name, &button).upcast() } else { button.clone().upcast() };
+            widget.set_hexpand(true);
             self.grid.attach(&widget, (index % 2) as i32, (index / 2) as i32, 1, 1);
             buttons.push((name, button));
         }

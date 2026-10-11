@@ -1,6 +1,7 @@
 //! Add / edit a popup button.
 
 use adw::prelude::*;
+use gtk::{gdk, glib};
 
 use crate::app::show_message;
 use crate::options::{OptionEntry, Options};
@@ -146,7 +147,7 @@ pub fn open(
     initial: Option<(&str, &OptionEntry)>,
     accept: impl Fn(ButtonData) -> Result<(), (String, String)> + 'static,
 ) {
-    let dialog = adw::Dialog::builder().title(title).content_width(520).build();
+    let dialog = adw::Window::builder().title(title).modal(true).transient_for(parent).default_width(520).build();
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
     content.set_margin_top(12);
@@ -168,7 +169,7 @@ pub fn open(
     placeholder.set_margin_start(8);
     placeholder.set_margin_top(6);
     let instruction_overlay = gtk::Overlay::new();
-    let scroller = gtk::ScrolledWindow::builder().child(&instruction).min_content_height(160).build();
+    let scroller = gtk::ScrolledWindow::builder().child(&instruction).min_content_height(160).vexpand(true).build();
     scroller.add_css_class("card");
     instruction_overlay.set_child(Some(&scroller));
     instruction_overlay.add_overlay(&placeholder);
@@ -223,7 +224,7 @@ pub fn open(
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&content));
-    dialog.set_child(Some(&toolbar));
+    dialog.set_content(Some(&toolbar));
     dialog.set_default_widget(Some(&ok));
     name.set_activates_default(true);
     hotkey.set_activates_default(true);
@@ -258,7 +259,22 @@ pub fn open(
             }
         }
     });
-    dialog.present(Some(parent));
+    let escape = gtk::EventControllerKey::new();
+    escape.connect_key_pressed({
+        let dialog = dialog.downgrade();
+        move |_, key, _, _| {
+            if key == gdk::Key::Escape {
+                if let Some(dialog) = dialog.upgrade() {
+                    dialog.close();
+                }
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        }
+    });
+    dialog.add_controller(escape);
+    dialog.present();
 }
 
 #[cfg(test)]
