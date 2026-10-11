@@ -134,6 +134,17 @@ impl ProviderKind {
         }
     }
 
+    /// A short name for places with little room.
+    pub fn short_name(self) -> &'static str {
+        match self {
+            ProviderKind::Gemini => "Gemini",
+            ProviderKind::Subscription => "ChatGPT",
+            ProviderKind::OpenRouter => "OpenRouter",
+            ProviderKind::OpenAiCompatible => "OpenAI Compatible",
+            ProviderKind::Ollama => "Ollama",
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|kind| kind.name() == name)
     }

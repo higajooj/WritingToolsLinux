@@ -224,15 +224,28 @@ impl App {
     /// The provider for a button: its own provider and model where set,
     /// otherwise the default ones.
     pub fn provider_for(&self, option: &OptionEntry) -> Option<Arc<dyn Provider>> {
-        fn filled(value: &Option<String>) -> Option<&str> {
-            value.as_deref().map(str::trim).filter(|v| !v.is_empty())
-        }
-        let kind = filled(&option.provider).and_then(ProviderKind::from_name);
-        let model = filled(&option.model);
+        let (kind, model) = button_provider(option);
         if kind.is_none() && model.is_none() {
             return self.provider.borrow().clone();
         }
         Some(self.build_provider(kind.unwrap_or_else(|| self.current_kind()), model))
+    }
+
+    /// The provider and model a button uses, to show the user.
+    pub fn provider_label(&self, option: &OptionEntry) -> String {
+        let (kind, model) = button_provider(option);
+        let kind = kind.unwrap_or_else(|| self.current_kind());
+        let model = match (model, kind) {
+            (Some(model), _) => model.to_owned(),
+            (None, ProviderKind::Subscription) => self.subscription.choices().model,
+            (None, _) => {
+                let config = self.config.borrow().provider_config(kind.name());
+                let spec = kind.settings().into_iter().find(|spec| spec.key == kind.model_key());
+                spec.map(|spec| spec.value(&config)).unwrap_or_default()
+            }
+        };
+        let model = model.trim();
+        format!("{} · {}", kind.short_name(), if model.is_empty() { "Automatic" } else { model })
     }
 
     // ---------------------------------------------------------------- shortcut
@@ -373,7 +386,8 @@ impl App {
             let record = app.record_history(&name, &text, extra.as_deref());
 
             if option.open_in_window {
-                let request = ui::response::Request { provider, system, prompt: user_prompt };
+                let label = app.provider_label(&option);
+                let request = ui::response::Request { provider, label, system, prompt: user_prompt };
                 ui::response::open(&app, &name, &text, extra.as_deref(), request, record);
                 return;
             }
@@ -487,6 +501,14 @@ impl App {
         log::debug!("Exiting application");
         self.gtk.quit();
     }
+}
+
+/// A button's own provider and model, where it sets them.
+fn button_provider(option: &OptionEntry) -> (Option<ProviderKind>, Option<&str>) {
+    fn filled(value: &Option<String>) -> Option<&str> {
+        value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+    }
+    (filled(&option.provider).and_then(ProviderKind::from_name), filled(&option.model))
 }
 
 /// A simple message dialog. Without a parent it opens as its own window.

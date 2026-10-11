@@ -4,7 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
@@ -47,6 +47,17 @@ fn next_zoom(current: f64, action: Zoom) -> f64 {
     }
 }
 
+/// How long a request took: tenths of a second when `precise`, as under a
+/// reply, or whole seconds for the running counter.
+fn format_elapsed(elapsed: Duration, precise: bool) -> String {
+    let seconds = elapsed.as_secs();
+    match (seconds / 60, precise) {
+        (0, true) => format!("{:.1}s", elapsed.as_secs_f64()),
+        (0, false) => format!("{seconds}s"),
+        (minutes, _) => format!("{minutes}m {:02}s", seconds % 60),
+    }
+}
+
 fn user_label(text: &str, css_class: &str) -> gtk::Label {
     let label = gtk::Label::new(Some(text));
     label.set_wrap(true);
@@ -75,6 +86,8 @@ struct Response {
     history: RefCell<Vec<Message>>,
     thinking_timer: RefCell<Option<glib::SourceId>>,
     thinking_state: Cell<usize>,
+    /// When the current (or last) request was sent.
+    started: Cell<Instant>,
     request: RefCell<Option<tokio::task::AbortHandle>>,
     /// Keep scrolling to the end while a new message is being laid out.
     follow_end: RefCell<Option<glib::SourceId>>,
@@ -83,6 +96,8 @@ struct Response {
 /// What to ask, and the button's provider to ask it of.
 pub struct Request {
     pub provider: Arc<dyn Provider>,
+    /// The provider and model, shown in the header.
+    pub label: String,
     pub system: String,
     pub prompt: String,
 }
@@ -90,7 +105,7 @@ pub struct Request {
 /// Open a window for `option`, show the user's instructions and text, and run
 /// the request. The first reply is saved to the history entry `record`.
 pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str>, request: Request, record: u64) {
-    let Request { provider, system, prompt } = request;
+    let Request { provider, label, system, prompt } = request;
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let css_name = format!("response-chat-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
 
@@ -104,6 +119,11 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
         .build();
 
     let header = adw::HeaderBar::new();
+    let provider_label = gtk::Label::builder().label(label).ellipsize(gtk::pango::EllipsizeMode::End).build();
+    provider_label.add_css_class("dim-label");
+    provider_label.add_css_class("caption");
+    provider_label.set_margin_start(6);
+    header.pack_start(&provider_label);
     let zoom_in = icons::button("plus", 16, "Zoom In");
     let zoom_out = icons::button("minus", 16, "Zoom Out");
     let zoom_reset = icons::button("reset", 16, "Reset Zoom");
@@ -114,6 +134,7 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
     let thinking = gtk::Label::new(Some("Thinking"));
     thinking.add_css_class("title-3");
     thinking.add_css_class("dim-label");
+    thinking.set_justify(gtk::Justification::Center);
     thinking.set_margin_top(12);
 
     let chat = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -168,6 +189,7 @@ pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str
         history: RefCell::new(vec![Message::user(prompt.clone())]),
         thinking_timer: RefCell::new(None),
         thinking_state: Cell::new(0),
+        started: Cell::new(Instant::now()),
         request: RefCell::new(None),
         follow_end: RefCell::new(None),
     });
@@ -309,9 +331,15 @@ impl Response {
         card.append(&markdown::render(text));
         message.append(&card);
 
+        let took = gtk::Label::new(Some(&format_elapsed(self.started.get().elapsed(), true)));
+        took.set_tooltip_text(Some("Time taken for this response"));
+        took.set_xalign(0.0);
+        took.set_hexpand(true);
+        took.set_margin_start(6);
+        took.add_css_class("dim-label");
+        took.add_css_class("caption");
         let copy = icons::button("copy", 16, "Copy response");
         copy.add_css_class("flat");
-        copy.set_halign(gtk::Align::End);
         copy.set_cursor_from_name(Some("pointer"));
         let text = text.to_owned();
         let toasts = self.toasts.clone();
@@ -319,7 +347,10 @@ impl Response {
             button.clipboard().set_text(&text);
             toasts.add_toast(adw::Toast::builder().title("Copied to clipboard").timeout(2).build());
         });
-        message.append(&copy);
+        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        footer.append(&took);
+        footer.append(&copy);
+        message.append(&footer);
         self.append(&message);
     }
 
@@ -353,6 +384,7 @@ impl Response {
 
     fn start_thinking(self: &Rc<Self>, initial: bool) {
         self.thinking_state.set(0);
+        self.started.set(Instant::now());
         self.thinking.set_visible(initial);
         self.entry.set_sensitive(false);
         self.update_thinking();
@@ -369,11 +401,13 @@ impl Response {
     }
 
     fn update_thinking(&self) {
-        let text = format!("Thinking{}", THINKING_DOTS[self.thinking_state.get()]);
+        let elapsed = format_elapsed(self.started.get().elapsed(), false);
+        let dots = THINKING_DOTS[self.thinking_state.get()];
         if self.thinking.is_visible() {
-            self.thinking.set_text(&text);
+            // On its own centred line the counter stays put while the dots change.
+            self.thinking.set_markup(&format!("Thinking{dots}\n<small>{elapsed}</small>"));
         } else {
-            self.entry.set_placeholder_text(Some(&text));
+            self.entry.set_placeholder_text(Some(&format!("Thinking {elapsed}{dots}")));
         }
     }
 
@@ -476,5 +510,13 @@ mod tests {
         assert_eq!(next_zoom(MIN_ZOOM, Zoom::Out), MIN_ZOOM);
         assert!((next_zoom(1.0, Zoom::In) - 1.1).abs() < 1e-9);
         assert_eq!(next_zoom(2.0, Zoom::Reset), DEFAULT_ZOOM);
+    }
+
+    #[test]
+    fn elapsed_times() {
+        assert_eq!(format_elapsed(Duration::from_millis(3240), true), "3.2s");
+        assert_eq!(format_elapsed(Duration::from_millis(3940), false), "3s");
+        assert_eq!(format_elapsed(Duration::from_secs(65), true), "1m 05s");
+        assert_eq!(format_elapsed(Duration::from_secs(125), false), "2m 05s");
     }
 }
