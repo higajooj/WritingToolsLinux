@@ -23,6 +23,12 @@ pub struct OptionEntry {
     /// Popup-local shortcut; absent means none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hotkey: Option<String>,
+    /// Provider name to use instead of the default one; absent means the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Model to use instead of the one set for the provider in Settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Fields written by other versions are kept as they are.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -92,6 +98,17 @@ mod tests {
         let text = serde_json::to_string(&parsed).unwrap();
         assert!(text.contains(r#""future":1"#));
         assert!(!text.contains("hotkey"));
+        assert!(!text.contains("provider") && !text.contains("model"));
+    }
+
+    #[test]
+    fn provider_and_model_round_trip() {
+        let parsed: Options = serde_json::from_str(r#"{"A": {"provider": "OpenRouter", "model": "x/y"}}"#).unwrap();
+        assert_eq!(parsed["A"].provider.as_deref(), Some("OpenRouter"));
+        assert_eq!(parsed["A"].model.as_deref(), Some("x/y"));
+        assert!(parsed["A"].extra.is_empty());
+        let text = serde_json::to_string(&parsed).unwrap();
+        assert!(text.contains(r#""provider":"OpenRouter","model":"x/y""#));
     }
 
     #[test]

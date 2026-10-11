@@ -36,6 +36,7 @@ fn source(name: &str) -> Option<&'static [u8]> {
         "provider_gemini",
         "provider_ollama",
         "provider_openai",
+        "provider_openrouter",
         "regenerate",
         "reset",
         "restore",

@@ -2,6 +2,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -10,7 +11,7 @@ use gtk::{gdk, glib};
 
 use crate::app::{App, show_message};
 use crate::prompt::FOLLOWUP_SYSTEM_INSTRUCTION;
-use crate::providers::{Message, Prompt, ProviderError};
+use crate::providers::{Message, Prompt, Provider, ProviderError};
 use crate::{icons, markdown, runtime};
 
 pub const DEFAULT_ZOOM: f64 = 1.2;
@@ -60,6 +61,8 @@ fn user_label(text: &str, css_class: &str) -> gtk::Label {
 
 struct Response {
     app: Rc<App>,
+    /// The button's provider, which also answers the follow-ups.
+    provider: Arc<dyn Provider>,
     window: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     chat: gtk::Box,
@@ -77,17 +80,17 @@ struct Response {
     follow_end: RefCell<Option<glib::SourceId>>,
 }
 
+/// What to ask, and the button's provider to ask it of.
+pub struct Request {
+    pub provider: Arc<dyn Provider>,
+    pub system: String,
+    pub prompt: String,
+}
+
 /// Open a window for `option`, show the user's instructions and text, and run
 /// the request. The first reply is saved to the history entry `record`.
-pub fn open(
-    app: &Rc<App>,
-    option: &str,
-    selected_text: &str,
-    extra: Option<&str>,
-    prompt: String,
-    system: String,
-    record: u64,
-) {
+pub fn open(app: &Rc<App>, option: &str, selected_text: &str, extra: Option<&str>, request: Request, record: u64) {
+    let Request { provider, system, prompt } = request;
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let css_name = format!("response-chat-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
 
@@ -152,6 +155,7 @@ pub fn open(
 
     let response = Rc::new(Response {
         app: app.clone(),
+        provider,
         window: window.clone(),
         toasts,
         chat,
@@ -247,10 +251,7 @@ impl Response {
     /// Run a request, delivering the result on the GTK thread. Closing the
     /// window aborts it.
     fn run(&self, system: String, prompt: Prompt, done: impl FnOnce(Result<String, ProviderError>) + 'static) {
-        let Some(provider) = self.app.provider() else {
-            done(Err(ProviderError::new("Error", "Choose an AI provider in Settings first.")));
-            return;
-        };
+        let provider = self.provider.clone();
         let job = runtime::spawn(async move { provider.respond(&system, prompt).await });
         self.request.replace(Some(job.abort_handle()));
         glib::spawn_future_local(async move {

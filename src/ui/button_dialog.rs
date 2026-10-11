@@ -7,6 +7,7 @@ use crate::app::show_message;
 use crate::options::{OptionEntry, Options};
 use crate::portal::validate_trigger;
 use crate::prompt::CUSTOM;
+use crate::providers::ProviderKind;
 
 pub const DEFAULT_PREFIX: &str = "Make this change to the following text:\n\n";
 pub const DEFAULT_ICON: &str = "icons/custom";
@@ -19,6 +20,10 @@ pub struct ButtonData {
     pub open_in_window: bool,
     /// Lower-cased; `None` for no popup shortcut.
     pub hotkey: Option<String>,
+    /// Provider name; `None` for the default provider.
+    pub provider: Option<String>,
+    /// `None` for the model set for the provider in Settings.
+    pub model: Option<String>,
 }
 
 /// Modifier-insensitive identity of a shortcut, so `Ctrl+J` and `control+j` match.
@@ -98,6 +103,8 @@ pub fn build_entry(data: &ButtonData, existing: Option<&OptionEntry>) -> OptionE
     entry.instruction = data.instruction.clone();
     entry.open_in_window = data.open_in_window;
     entry.hotkey = data.hotkey.clone();
+    entry.provider = data.provider.clone();
+    entry.model = data.model.clone();
     entry
 }
 
@@ -140,11 +147,13 @@ fn heading(text: &str) -> gtk::Label {
     label
 }
 
-/// Show the dialog. `accept` returns an error message to keep it open.
+/// Show the dialog. `default_provider` names the provider used by buttons
+/// that do not choose one. `accept` returns an error message to keep it open.
 pub fn open(
     parent: &gtk::Window,
     title: &str,
     initial: Option<(&str, &OptionEntry)>,
+    default_provider: ProviderKind,
     accept: impl Fn(ButtonData) -> Result<(), (String, String)> + 'static,
 ) {
     let dialog = adw::Window::builder()
@@ -208,6 +217,30 @@ pub fn open(
     hint.add_css_class("caption");
     content.append(&hint);
 
+    content.append(&heading("AI provider and model (optional):"));
+    let default_label = format!("Default ({})", default_provider.name());
+    let mut providers = vec![default_label.as_str()];
+    providers.extend(ProviderKind::ALL.iter().map(|kind| kind.name()));
+    let provider = gtk::DropDown::from_strings(&providers);
+    let model = gtk::Entry::builder().hexpand(true).build();
+    let update_model = {
+        let model = model.clone();
+        move |provider: &gtk::DropDown| {
+            let own = provider.selected() > 0;
+            model.set_sensitive(own);
+            model.set_placeholder_text(Some(if own {
+                "Model for this button  (leave blank for the provider's model in Settings)"
+            } else {
+                "Uses the default provider's model"
+            }));
+        }
+    };
+    provider.connect_selected_notify(update_model.clone());
+    let provider_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    provider_row.append(&provider);
+    provider_row.append(&model);
+    content.append(&provider_row);
+
     match initial {
         Some((initial_name, entry)) => {
             name.set_text(initial_name);
@@ -215,10 +248,16 @@ pub fn open(
             window.set_active(entry.open_in_window);
             clipboard.set_active(!entry.open_in_window);
             hotkey.set_text(entry.hotkey.as_deref().unwrap_or_default());
+            let kind = entry.provider.as_deref().and_then(ProviderKind::from_name);
+            if let Some(index) = kind.and_then(|kind| ProviderKind::ALL.iter().position(|k| *k == kind)) {
+                provider.set_selected(index as u32 + 1);
+                model.set_text(entry.model.as_deref().unwrap_or_default());
+            }
         }
         None => clipboard.set_active(true),
     }
     placeholder.set_visible(buffer.char_count() == 0);
+    update_model(&provider);
 
     let cancel = gtk::Button::with_label("Cancel");
     let ok = gtk::Button::with_label("OK");
@@ -234,6 +273,7 @@ pub fn open(
     dialog.set_default_widget(Some(&ok));
     name.set_activates_default(true);
     hotkey.set_activates_default(true);
+    model.set_activates_default(true);
 
     cancel.connect_clicked({
         let dialog = dialog.downgrade();
@@ -248,11 +288,16 @@ pub fn open(
         move |_| {
             let Some(dialog) = dialog.upgrade() else { return };
             let hotkey = hotkey.text().trim().to_lowercase();
+            // Position 0 is the default provider, which also decides the model.
+            let kind = (provider.selected() as usize).checked_sub(1).and_then(|i| ProviderKind::ALL.get(i));
+            let model = model.text().trim().to_owned();
             let data = ButtonData {
                 name: name.text().trim().to_owned(),
                 instruction: buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string(),
                 open_in_window: window.is_active(),
                 hotkey: (!hotkey.is_empty()).then_some(hotkey),
+                provider: kind.map(|kind| kind.name().to_owned()),
+                model: kind.filter(|_| !model.is_empty()).map(|_| model),
             };
             // A rejected entry keeps the dialog open with the user's input.
             match accept(data) {
@@ -339,16 +384,23 @@ mod tests {
             instruction: "CAPS".into(),
             open_in_window: true,
             hotkey: Some("ctrl+9".into()),
+            provider: Some("OpenRouter".into()),
+            model: Some("x/y".into()),
         };
         let added = apply(&options, None, &data);
         let entry = &added["Shout"];
+        assert_eq!((entry.provider.as_deref(), entry.model.as_deref()), (Some("OpenRouter"), Some("x/y")));
         assert_eq!((entry.prefix.as_str(), entry.icon.as_str()), (DEFAULT_PREFIX, DEFAULT_ICON));
         assert_eq!(added.keys().last().map(String::as_str), Some("Shout"));
 
-        // Renaming keeps the position, prefix, icon and unknown fields; clearing the hotkey drops it.
+        // Renaming keeps the position, prefix, icon and unknown fields; clearing
+        // the hotkey or the provider drops it.
         let mut options = options;
-        options.get_mut("Rewrite").unwrap().extra.insert("future".into(), serde_json::json!(1));
-        let data = ButtonData { name: "Rephrase".into(), instruction: "x".into(), open_in_window: false, hotkey: None };
+        let rewrite = options.get_mut("Rewrite").unwrap();
+        rewrite.extra.insert("future".into(), serde_json::json!(1));
+        rewrite.provider = Some("OpenRouter".into());
+        rewrite.model = Some("x/y".into());
+        let data = ButtonData { name: "Rephrase".into(), instruction: "x".into(), ..Default::default() };
         let edited = apply(&options, Some("Rewrite"), &data);
         let names: Vec<&str> = edited.keys().map(String::as_str).collect();
         assert_eq!(&names[..3], ["Proofread", "Rephrase", "Friendly"]);
@@ -356,6 +408,7 @@ mod tests {
         assert_eq!(entry.prefix, "Rewrite this:\n\n");
         assert_eq!(entry.icon, "icons/rewrite");
         assert_eq!(entry.hotkey, None);
+        assert_eq!((entry.provider.as_deref(), entry.model.as_deref()), (None, None));
         assert_eq!(entry.extra["future"], 1);
         assert!(!edited.contains_key("Rewrite"));
     }

@@ -585,8 +585,13 @@ impl Subscription {
         Ok(())
     }
 
-    async fn resolve_model(&self) -> Result<String, CodexError> {
-        let model = self.state.lock().unwrap().choices.model.clone();
+    /// The model for a turn: `requested` (a button's own model) or the saved
+    /// one. Either falls back to Automatic when the account lacks it.
+    async fn resolve_model(&self, requested: Option<&str>) -> Result<String, CodexError> {
+        let model = match requested {
+            Some(model) => model.to_owned(),
+            None => self.state.lock().unwrap().choices.model.clone(),
+        };
         if model.is_empty() {
             return Ok(model);
         }
@@ -595,14 +600,18 @@ impl Subscription {
         }
         let mut state = self.state.lock().unwrap();
         if !state.models.iter().any(|m| model_id(m) == Some(&model)) {
-            log::warn!("Saved Codex model \"{model}\" is unavailable; using default");
-            state.choices.model.clear();
+            log::warn!("Codex model \"{model}\" is unavailable; using default");
+            if requested.is_none() {
+                state.choices.model.clear();
+            }
             return Ok(String::new());
         }
         Ok(model)
     }
 
-    async fn resolve_reasoning_effort(&self, model: &str) -> Option<String> {
+    /// The saved thinking level if `model` supports it. `saved_model` is false
+    /// for a button's own model, which must not reset the saved level.
+    async fn resolve_reasoning_effort(&self, model: &str, saved_model: bool) -> Option<String> {
         let effort = self.state.lock().unwrap().choices.reasoning_effort.clone();
         if effort.is_empty() {
             return None;
@@ -622,7 +631,9 @@ impl Subscription {
                 "Saved thinking level \"{effort}\" is unavailable for model \"{}\"; using default",
                 if model.is_empty() { "Automatic" } else { model }
             );
-            state.choices.reasoning_effort.clear();
+            if saved_model {
+                state.choices.reasoning_effort.clear();
+            }
             return None;
         }
         Some(effort)
@@ -669,16 +680,20 @@ impl Drop for TurnGuard {
 }
 
 /// `Provider` for a shared subscription.
-pub struct SubscriptionProvider(pub Arc<Subscription>);
+pub struct SubscriptionProvider {
+    pub subscription: Arc<Subscription>,
+    /// A model to use instead of the saved one.
+    pub model: Option<String>,
+}
 
 #[async_trait]
 impl Provider for SubscriptionProvider {
     async fn respond(&self, system_instruction: &str, prompt: Prompt) -> Result<String, ProviderError> {
-        let this = &self.0;
+        let this = &self.subscription;
         let prepare = async {
             this.ensure_authenticated().await?;
-            let model = this.resolve_model().await?;
-            let effort = this.resolve_reasoning_effort(&model).await;
+            let model = this.resolve_model(self.model.as_deref()).await?;
+            let effort = this.resolve_reasoning_effort(&model, self.model.is_none()).await;
             Ok::<_, CodexError>((model, effort))
         };
         let (model, effort) =
@@ -785,7 +800,7 @@ mod tests {
             reasoning_effort: "high".into(),
             service_tier: "priority".into(),
         });
-        let provider = SubscriptionProvider(sub.clone());
+        let provider = SubscriptionProvider { subscription: sub.clone(), model: None };
         let call = tokio::spawn(async move { provider.respond("sys", Prompt::Single("hi".into())).await });
 
         let mut server = servers.recv().await.unwrap();
@@ -811,9 +826,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_buttons_model_leaves_the_saved_choices_alone() {
+        let (sub, mut servers) = subscription();
+        let saved = Choices { model: "gpt-a".into(), reasoning_effort: "high".into(), service_tier: "default".into() };
+        sub.set_choices(saved.clone());
+        let respond = |model: &str| {
+            let provider = SubscriptionProvider { subscription: sub.clone(), model: Some(model.into()) };
+            tokio::spawn(async move { provider.respond("sys", Prompt::Single("hi".into())).await })
+        };
+        let completed = json!({"method": "turn/completed", "params": {"threadId": "t", "turn": {"status": "completed", "items": [{"type": "agentMessage", "text": "ok"}]}}});
+
+        // gpt-b has no thinking levels, so the saved one is not sent.
+        let call = respond("gpt-b");
+        let mut server = servers.recv().await.unwrap();
+        server.handshake().await;
+        server.expect("account/read", json!({"account": {"type": "chatgpt"}})).await;
+        server.expect("model/list", json!({"data": models()})).await;
+        let thread = server.expect("thread/start", json!({"thread": {"id": "t"}})).await;
+        assert_eq!(thread["params"]["model"], "gpt-b");
+        assert!(thread["params"].get("config").is_none());
+        server.expect("turn/start", json!({"turn": {"id": "u"}})).await;
+        server.send(completed.clone()).await;
+        assert_eq!(call.await.unwrap(), Ok("ok".into()));
+        assert_eq!(sub.choices(), saved);
+
+        // An unavailable model falls back to Automatic.
+        let call = respond("gone");
+        let thread = server.expect("thread/start", json!({"thread": {"id": "t"}})).await;
+        assert!(thread["params"].get("model").is_none());
+        assert_eq!(thread["params"]["config"]["model_reasoning_effort"], "high");
+        server.expect("turn/start", json!({"turn": {"id": "u"}})).await;
+        server.send(completed).await;
+        assert_eq!(call.await.unwrap(), Ok("ok".into()));
+        assert_eq!(sub.choices(), saved);
+    }
+
+    #[tokio::test]
     async fn signed_out_account_is_reported() {
         let (sub, mut servers) = subscription();
-        let provider = SubscriptionProvider(sub.clone());
+        let provider = SubscriptionProvider { subscription: sub.clone(), model: None };
         let call = tokio::spawn(async move { provider.respond("sys", Prompt::Single("hi".into())).await });
         let mut server = servers.recv().await.unwrap();
         server.handshake().await;
@@ -830,7 +881,7 @@ mod tests {
     #[tokio::test]
     async fn unauthorized_turn_clears_the_account() {
         let (sub, mut servers) = subscription();
-        let provider = SubscriptionProvider(sub.clone());
+        let provider = SubscriptionProvider { subscription: sub.clone(), model: None };
         let call = tokio::spawn(async move { provider.respond("sys", Prompt::Single("hi".into())).await });
         let mut server = servers.recv().await.unwrap();
         server.handshake().await;

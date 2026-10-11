@@ -12,7 +12,7 @@ use gtk::glib;
 
 use crate::config::{self, Config};
 use crate::history;
-use crate::options::{self, Options};
+use crate::options::{self, OptionEntry, Options};
 use crate::portal::{self, PortalEvent, ShortcutPortal};
 use crate::prompt;
 use crate::providers::subscription::{Choices, Subscription, SubscriptionProvider};
@@ -199,21 +199,40 @@ impl App {
     }
 
     pub fn current_kind(&self) -> ProviderKind {
-        self.config.borrow().provider.as_deref().and_then(ProviderKind::from_name).unwrap_or(ProviderKind::Gemini)
+        self.config.borrow().provider.as_deref().and_then(ProviderKind::from_name).unwrap_or(ProviderKind::Subscription)
     }
 
-    /// Build the request provider from the saved settings.
+    /// Build the default request provider from the saved settings.
     pub fn activate_provider(&self) {
-        let kind = self.current_kind();
-        let provider_config = self.config.borrow().provider_config(kind.name());
-        let provider: Arc<dyn Provider> = match providers::build(kind, &provider_config) {
-            Some(provider) => provider,
-            None => {
-                self.subscription.set_choices(Choices::from_config(&provider_config));
-                Arc::new(SubscriptionProvider(self.subscription.clone()))
-            }
-        };
-        self.provider.replace(Some(provider));
+        // A button may use the subscription even when it is not the default.
+        let subscription = self.config.borrow().provider_config(ProviderKind::Subscription.name());
+        self.subscription.set_choices(Choices::from_config(&subscription));
+        self.provider.replace(Some(self.build_provider(self.current_kind(), None)));
+    }
+
+    /// A provider from its saved settings, optionally with another model.
+    fn build_provider(&self, kind: ProviderKind, model: Option<&str>) -> Arc<dyn Provider> {
+        let mut config = self.config.borrow().provider_config(kind.name());
+        if let Some(model) = model {
+            config = providers::with_model(kind, &config, model);
+        }
+        providers::build(kind, &config).unwrap_or_else(|| {
+            Arc::new(SubscriptionProvider { subscription: self.subscription.clone(), model: model.map(str::to_owned) })
+        })
+    }
+
+    /// The provider for a button: its own provider and model where set,
+    /// otherwise the default ones.
+    pub fn provider_for(&self, option: &OptionEntry) -> Option<Arc<dyn Provider>> {
+        fn filled(value: &Option<String>) -> Option<&str> {
+            value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+        }
+        let kind = filled(&option.provider).and_then(ProviderKind::from_name);
+        let model = filled(&option.model);
+        if kind.is_none() && model.is_none() {
+            return self.provider.borrow().clone();
+        }
+        Some(self.build_provider(kind.unwrap_or_else(|| self.current_kind()), model))
     }
 
     // ---------------------------------------------------------------- shortcut
@@ -320,10 +339,6 @@ impl App {
 
     // ---------------------------------------------------------------- requests
 
-    pub fn provider(&self) -> Option<Arc<dyn Provider>> {
-        self.provider.borrow().clone()
-    }
-
     /// Run a button (or `Custom`) on the captured text, with optional
     /// instructions for this invocation.
     pub fn process_option(self: &Rc<Self>, name: String, extra: Option<String>) {
@@ -349,7 +364,7 @@ impl App {
                 show_message(None::<&gtk::Widget>, "Error", &format!("The button \"{name}\" no longer exists."));
                 return;
             };
-            let Some(provider) = app.provider() else {
+            let Some(provider) = app.provider_for(&option) else {
                 show_message(None::<&gtk::Widget>, "Error", "Choose an AI provider in Settings first.");
                 return;
             };
@@ -358,7 +373,8 @@ impl App {
             let record = app.record_history(&name, &text, extra.as_deref());
 
             if option.open_in_window {
-                ui::response::open(&app, &name, &text, extra.as_deref(), user_prompt, system, record);
+                let request = ui::response::Request { provider, system, prompt: user_prompt };
+                ui::response::open(&app, &name, &text, extra.as_deref(), request, record);
                 return;
             }
 

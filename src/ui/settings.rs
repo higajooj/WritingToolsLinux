@@ -1,4 +1,4 @@
-//! Settings: the main shortcut and the AI provider with its options.
+//! Settings: the main shortcut, each AI provider's options and the default provider.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -32,10 +32,10 @@ struct Settings {
     dialog: adw::Dialog,
     providers_only: bool,
     shortcut: Option<adw::EntryRow>,
-    provider_row: adw::ComboRow,
-    provider_group: RefCell<Option<adw::PreferencesGroup>>,
+    default_row: adw::ComboRow,
+    /// Every provider opened so far, so that edits survive switching between them.
+    panels: RefCell<Vec<(ProviderKind, adw::PreferencesGroup, Collector)>>,
     page: adw::PreferencesPage,
-    collector: RefCell<Option<Collector>>,
     saved: Cell<bool>,
 }
 
@@ -59,11 +59,22 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
     });
 
     let names: Vec<&str> = ProviderKind::ALL.iter().map(|kind| kind.name()).collect();
-    let provider_row =
-        adw::ComboRow::builder().title("Choose AI Provider").model(&gtk::StringList::new(&names)).build();
     let current = app.current_kind();
-    provider_row.set_selected(ProviderKind::ALL.iter().position(|kind| *kind == current).unwrap_or(0) as u32);
+    let provider_combo = |title: &str, subtitle: &str| {
+        let row = adw::ComboRow::builder()
+            .title(title)
+            .subtitle(subtitle)
+            .subtitle_lines(0)
+            .model(&gtk::StringList::new(&names))
+            .build();
+        row.set_selected(ProviderKind::ALL.iter().position(|kind| *kind == current).unwrap_or(0) as u32);
+        show_full_labels(&row);
+        row
+    };
+    let default_row = provider_combo("Default AI Provider", "Used by every button that does not choose its own.");
+    let provider_row = provider_combo("Set Up Provider", "Each provider keeps its own settings.");
     let group = adw::PreferencesGroup::new();
+    group.add(&default_row);
     group.add(&provider_row);
     page.add(&group);
 
@@ -81,10 +92,9 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
         dialog: dialog.clone(),
         providers_only,
         shortcut,
-        provider_row: provider_row.clone(),
-        provider_group: RefCell::new(None),
+        default_row: default_row.clone(),
+        panels: RefCell::new(Vec::new()),
         page,
-        collector: RefCell::new(None),
         saved: Cell::new(false),
     });
     settings.show_provider(current);
@@ -95,6 +105,8 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
             settings.show_provider(ProviderKind::ALL[row.selected() as usize]);
         }
     });
+    // Choosing a default also opens it, as it is the one that has to work.
+    default_row.connect_selected_notify(move |row| provider_row.set_selected(row.selected()));
     let weak = Rc::downgrade(&settings);
     save.connect_clicked(move |button| {
         let Some(settings) = weak.upgrade() else { return };
@@ -118,13 +130,18 @@ pub fn show(app: &Rc<App>, providers_only: bool) {
 }
 
 impl Settings {
-    fn selected_kind(&self) -> ProviderKind {
-        ProviderKind::ALL[self.provider_row.selected() as usize]
+    fn default_kind(&self) -> ProviderKind {
+        ProviderKind::ALL[self.default_row.selected() as usize]
     }
 
     fn show_provider(self: &Rc<Self>, kind: ProviderKind) {
-        if let Some(old) = self.provider_group.take() {
-            self.page.remove(&old);
+        let mut known = false;
+        for (panel, group, _) in self.panels.borrow().iter() {
+            group.set_visible(*panel == kind);
+            known |= *panel == kind;
+        }
+        if known {
+            return;
         }
         let group = adw::PreferencesGroup::builder().title(kind.name()).description(kind.description()).build();
         if let Some(logo) = icons::themed_texture(kind.logo(), 30) {
@@ -144,13 +161,12 @@ impl Settings {
             ProviderKind::Subscription => SubscriptionPanel::build(&group, self.app.subscription.clone(), &config),
             _ => generic_rows(&group, kind.settings(), &config, kind == ProviderKind::OpenAiCompatible),
         };
-        self.collector.replace(Some(collector));
         self.page.add(&group);
-        self.provider_group.replace(Some(group));
+        self.panels.borrow_mut().push((kind, group, collector));
     }
 
     async fn save(self: &Rc<Self>) {
-        let kind = self.selected_kind();
+        let kind = self.default_kind();
         let validation = match kind {
             ProviderKind::Subscription => self.app.subscription.validate().await,
             _ => Ok(()),
@@ -170,15 +186,15 @@ impl Settings {
             );
             return;
         }
-        let provider_config = self.collector.borrow().as_ref().map(|collect| collect()).unwrap_or_default();
-
         {
             let mut config = self.app.config.borrow_mut();
             if let Some(shortcut) = shortcut {
                 config.shortcut = Some(shortcut);
             }
             config.provider = Some(kind.name().to_owned());
-            config.providers.insert(kind.name().to_owned(), Value::Object(provider_config));
+            for (panel, _, collect) in self.panels.borrow().iter() {
+                config.providers.insert(panel.name().to_owned(), Value::Object(collect()));
+            }
         }
         self.app.save_config();
         self.app.activate_provider();
@@ -189,6 +205,61 @@ impl Settings {
         self.saved.set(true);
         self.dialog.close();
     }
+}
+
+/// Show a combo row's choices in full; the default labels cut long names short.
+fn show_full_labels(row: &adw::ComboRow) {
+    fn text(item: &gtk::ListItem) -> glib::GString {
+        item.item().and_downcast::<gtk::StringObject>().map(|s| s.string()).unwrap_or_default()
+    }
+    fn mark_selected(row: &adw::ComboRow, item: &gtk::ListItem) {
+        if let Some(check) = item.child().and_then(|content| content.last_child()) {
+            check.set_opacity(if row.selected_item() == item.item() { 1.0 } else { 0.0 });
+        }
+    }
+
+    let selected = gtk::SignalListItemFactory::new();
+    selected.connect_setup(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+        item.set_child(Some(&gtk::Label::builder().xalign(0.0).build()));
+    });
+    selected.connect_bind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+        if let Some(label) = item.child().and_downcast::<gtk::Label>() {
+            label.set_label(&text(item));
+        }
+    });
+    row.set_factory(Some(&selected));
+
+    let list = gtk::SignalListItemFactory::new();
+    let weak = row.downgrade();
+    list.connect_setup({
+        let weak = weak.clone();
+        move |_, item| {
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+            let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+            content.append(&gtk::Label::builder().xalign(0.0).hexpand(true).build());
+            content.append(&gtk::Image::from_icon_name("object-select-symbolic"));
+            item.set_child(Some(&content));
+            let Some(row) = weak.upgrade() else { return };
+            let item = item.downgrade();
+            row.connect_selected_item_notify(move |row| {
+                if let Some(item) = item.upgrade() {
+                    mark_selected(row, &item);
+                }
+            });
+        }
+    });
+    list.connect_bind(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
+        if let Some(label) = item.child().and_then(|content| content.first_child()).and_downcast::<gtk::Label>() {
+            label.set_label(&text(item));
+        }
+        if let Some(row) = weak.upgrade() {
+            mark_selected(&row, item);
+        }
+    });
+    row.set_list_factory(Some(&list));
 }
 
 fn open_url(url: &str) {

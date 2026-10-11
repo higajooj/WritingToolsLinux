@@ -506,7 +506,7 @@ impl Popup {
                 Err(("Error".into(), "The button could not be saved.".into()))
             }
         };
-        button_dialog::open(&self.window, title, initial, accept);
+        button_dialog::open(&self.window, title, initial, self.app.current_kind(), accept);
     }
 
     // ------------------------------------------------------------ reordering

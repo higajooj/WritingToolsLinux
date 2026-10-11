@@ -17,6 +17,7 @@ const FEATURES: &str = "• Instantly optimize your writing with AI by copying y
 • Supports an extensive range of AI models:
     - Gemini
     - ChatGPT subscription access through OpenAI Codex
+    - OpenRouter, with a different model per button if you like
     - ANY OpenAI Compatible API — including local LLMs!";
 
 pub fn show(app: &Rc<App>) {

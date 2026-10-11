@@ -4,6 +4,7 @@
 pub mod gemini;
 pub mod ollama;
 pub mod openai_compat;
+pub mod openrouter;
 pub mod subscription;
 
 use std::sync::OnceLock;
@@ -106,21 +107,28 @@ pub fn error_detail(status: reqwest::StatusCode, body: &str) -> String {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderKind {
-    Gemini,
     Subscription,
+    OpenRouter,
+    Gemini,
     OpenAiCompatible,
     Ollama,
 }
 
 impl ProviderKind {
-    pub const ALL: [ProviderKind; 4] =
-        [ProviderKind::Gemini, ProviderKind::Subscription, ProviderKind::OpenAiCompatible, ProviderKind::Ollama];
+    pub const ALL: [ProviderKind; 5] = [
+        ProviderKind::Subscription,
+        ProviderKind::OpenRouter,
+        ProviderKind::Gemini,
+        ProviderKind::OpenAiCompatible,
+        ProviderKind::Ollama,
+    ];
 
     /// The name shown in Settings, also the key under `providers` in config.json.
     pub fn name(self) -> &'static str {
         match self {
             ProviderKind::Gemini => "Gemini (Recommended)",
             ProviderKind::Subscription => "OpenAI Subscription (ChatGPT)",
+            ProviderKind::OpenRouter => "OpenRouter",
             ProviderKind::OpenAiCompatible => "OpenAI Compatible (For Experts)",
             ProviderKind::Ollama => "Ollama (For Experts)",
         }
@@ -142,6 +150,10 @@ impl ProviderKind {
                  • Sign in securely in your browser through the official Codex CLI.\n\
                  • This login is kept separate from your normal Codex CLI account."
             }
+            ProviderKind::OpenRouter => {
+                "• One API key for models from OpenAI, Anthropic, Google and many others.\n\
+                 • Set a default model here; any button can use a different one."
+            }
             ProviderKind::OpenAiCompatible => {
                 "• Connect to ANY OpenAI-compatible API (v1/chat/completions).\n\
                  • You must abide by the service's Terms of Service."
@@ -155,6 +167,7 @@ impl ProviderKind {
         match self {
             ProviderKind::Gemini => "provider_gemini",
             ProviderKind::Subscription | ProviderKind::OpenAiCompatible => "provider_openai",
+            ProviderKind::OpenRouter => "provider_openrouter",
             ProviderKind::Ollama => "provider_ollama",
         }
     }
@@ -164,6 +177,7 @@ impl ProviderKind {
         match self {
             ProviderKind::Gemini => Some(("Get API Key", "https://aistudio.google.com/app/apikey")),
             ProviderKind::Subscription => None,
+            ProviderKind::OpenRouter => Some(("Get OpenRouter API Key", "https://openrouter.ai/keys")),
             ProviderKind::OpenAiCompatible => {
                 Some(("Get OpenAI API Key", "https://platform.openai.com/account/api-keys"))
             }
@@ -179,8 +193,18 @@ impl ProviderKind {
         match self {
             ProviderKind::Gemini => gemini::settings(),
             ProviderKind::Subscription => Vec::new(),
+            ProviderKind::OpenRouter => openrouter::settings(),
             ProviderKind::OpenAiCompatible => openai_compat::settings(),
             ProviderKind::Ollama => ollama::settings(),
+        }
+    }
+
+    /// The key of the model in this provider's stored settings.
+    pub fn model_key(self) -> &'static str {
+        match self {
+            ProviderKind::Gemini => "model_name",
+            ProviderKind::Subscription => "model",
+            ProviderKind::OpenRouter | ProviderKind::OpenAiCompatible | ProviderKind::Ollama => "api_model",
         }
     }
 }
@@ -245,6 +269,14 @@ pub fn normalize_service_tier(value: &str) -> &'static str {
     if value == "priority" { "priority" } else { "default" }
 }
 
+/// A provider's stored settings with its model replaced, for a button that
+/// uses its own model.
+pub fn with_model(kind: ProviderKind, config: &Map<String, Value>, model: &str) -> Map<String, Value> {
+    let mut config = config.clone();
+    config.insert(kind.model_key().to_owned(), Value::String(model.to_owned()));
+    config
+}
+
 /// Build a request-ready provider from its stored settings.
 pub fn build(kind: ProviderKind, config: &Map<String, Value>) -> Option<std::sync::Arc<dyn Provider>> {
     let get = |key: &str| {
@@ -262,6 +294,7 @@ pub fn build(kind: ProviderKind, config: &Map<String, Value>) -> Option<std::syn
             model: get("api_model"),
             service_tier: get("service_tier"),
         }),
+        ProviderKind::OpenRouter => std::sync::Arc::new(openrouter::build(config)),
         ProviderKind::Ollama => std::sync::Arc::new(ollama::Ollama {
             api_base: get("api_base"),
             model: get("api_model"),
@@ -300,6 +333,31 @@ mod tests {
         assert_eq!(speed.value(&config), "default");
         let config = Map::from_iter([("service_tier".to_owned(), json!("priority"))]);
         assert_eq!(speed.value(&config), "priority");
+    }
+
+    #[test]
+    fn model_overrides_replace_each_providers_model() {
+        for kind in ProviderKind::ALL {
+            let config = Map::from_iter([("other".to_owned(), json!("kept"))]);
+            let config = with_model(kind, &config, "custom");
+            assert_eq!(config[kind.model_key()], "custom");
+            assert_eq!(config["other"], "kept");
+            if kind != ProviderKind::Subscription {
+                assert!(kind.settings().iter().any(|spec| spec.key == kind.model_key()), "{kind:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn openrouter_uses_its_own_endpoint_and_a_secret_key() {
+        let key = openrouter::settings().into_iter().find(|s| s.key == "api_key").unwrap();
+        let config = Map::from_iter([("api_key".to_owned(), key.stored("sk-or"))]);
+        assert_ne!(config["api_key"], "sk-or");
+        let provider = openrouter::build(&with_model(ProviderKind::OpenRouter, &config, "anthropic/claude"));
+        assert_eq!(provider.endpoint(), "https://openrouter.ai/api/v1/chat/completions");
+        assert_eq!(provider.api_key, "sk-or");
+        assert_eq!(provider.model, "anthropic/claude");
+        assert_eq!(openrouter::build(&Map::new()).model, "openai/gpt-4o-mini");
     }
 
     #[test]

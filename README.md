@@ -131,6 +131,8 @@ for window criteria and rules. Other compositors need their own equivalent.
 - Custom buttons and shortcuts in `options.json`.
 - Automatic light/dark appearance with simple solid backgrounds.
 - Local models through Ollama or an OpenAI-compatible server.
+- Many hosted models through OpenRouter with a single API key.
+- A default provider and model, with a different provider or model per button.
 - Browser-based ChatGPT subscription sign-in through the official Codex CLI.
 
 Settings, including provider credentials, are stored in
@@ -144,6 +146,18 @@ the text they were applied to and the first reply; they are kept in
 that window. Text is sent to the provider you
 configure when you invoke writing actions; local providers can keep processing
 on your machine.
+
+Settings holds every provider side by side. **Set Up Provider** chooses which
+one you are editing, and **Default AI Provider** chooses the one used by typed
+changes and by every button that does not pick its own. To give a button its
+own provider or model, edit it from the popup and fill in **AI provider and
+model**; a blank model uses the one set for that provider in Settings.
+Follow-up questions in a response window stay on the button's provider and
+model.
+
+For OpenRouter, choose **OpenRouter** in Settings, paste an API key from
+<https://openrouter.ai/keys>, and set a default model ID such as
+`openai/gpt-4o-mini`. The endpoint is already configured.
 
 For Ollama, start the server, download a model, and select the Ollama provider
 in Settings with that model's name. Alternatively, use the OpenAI-compatible
