@@ -38,6 +38,10 @@ window.popup {
   box-shadow: inset 0 0 0 2px @accent_color;
 }
 
+.option-button.base-action {
+  box-shadow: inset 0 0 0 1px alpha(currentColor, 0.25);
+}
+
 .option-button.drop-before {
   box-shadow: inset 3px 0 0 @accent_color;
 }

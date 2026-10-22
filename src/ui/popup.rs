@@ -212,8 +212,17 @@ pub fn show(app: &Rc<App>) -> gtk::Window {
 }
 
 impl Popup {
+    /// Buttons in display order. Base actions can't be run, so they only show
+    /// up for editing.
     fn option_names(&self) -> Vec<String> {
-        self.app.options.borrow().keys().filter(|name| *name != CUSTOM).cloned().collect()
+        let editing = self.edit_mode.get();
+        self.app
+            .options
+            .borrow()
+            .iter()
+            .filter(|(name, entry)| *name != CUSTOM && (editing || !entry.is_base))
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 
     /// Recreate the button grid and shortcuts from the current options.
@@ -253,6 +262,16 @@ impl Popup {
         row.append(&label);
         let button = gtk::Button::builder().child(&row).width_request(140).build();
         button.add_css_class("option-button");
+        if entry.is_base {
+            let tag = gtk::Label::new(Some("Base"));
+            tag.add_css_class("dim-label");
+            tag.add_css_class("caption");
+            tag.set_hexpand(true);
+            tag.set_halign(gtk::Align::End);
+            row.append(&tag);
+            button.add_css_class("base-action");
+            button.set_tooltip_text(Some("Reusable base action: other buttons can build on its instruction"));
+        }
         // Surface popup-local shortcuts without cluttering buttons lacking one.
         if let Some(hotkey) = entry.hotkey.as_deref().map(str::trim).filter(|h| !h.is_empty()) {
             button.set_tooltip_text(Some(&format!("Popup shortcut (while active): {hotkey}")));
@@ -353,7 +372,7 @@ impl Popup {
         }
         let mut taken = vec![shortcut_identity(self.app.config.borrow().shortcut())];
         for (name, entry) in options {
-            if name == CUSTOM {
+            if name == CUSTOM || entry.is_base {
                 continue;
             }
             let Some(trigger_text) = entry.hotkey.as_deref().map(str::trim).filter(|h| !h.is_empty()) else { continue };
@@ -466,6 +485,15 @@ impl Popup {
     }
 
     fn confirm_delete(self: &Rc<Self>, name: &str) {
+        let users = button_dialog::dependents(&self.app.options.borrow(), name).join(", ");
+        if !users.is_empty() {
+            show_message(
+                Some(&self.window),
+                "Base action in use",
+                &format!("'{name}' is the base action of {users}. Pick a different base for them first."),
+            );
+            return;
+        }
         let weak = Rc::downgrade(self);
         let key = name.to_owned();
         self.confirm("Confirm Delete?", &format!("Delete the '{name}' button?"), move || {
@@ -495,6 +523,7 @@ impl Popup {
             let options = popup.app.options.borrow().clone();
             let current = current.as_deref();
             button_dialog::validate_name(&data.name, &options, current).map_err(|e| ("Invalid name".to_owned(), e))?;
+            button_dialog::validate_base(&data, &options, current).map_err(|e| ("Base action in use".to_owned(), e))?;
             let main = popup.app.config.borrow().shortcut().to_owned();
             button_dialog::validate_hotkey(data.hotkey.as_deref(), &options, &main, current)
                 .map_err(|e| ("Invalid hotkey".to_owned(), e))?;
@@ -506,7 +535,13 @@ impl Popup {
                 Err(("Error".into(), "The button could not be saved.".into()))
             }
         };
-        button_dialog::open(&self.window, title, initial, self.app.current_kind(), accept);
+        // A base can't build on itself.
+        let bases: Vec<String> = options
+            .iter()
+            .filter(|(name, entry)| entry.is_base && Some(name.as_str()) != initial_name.as_deref())
+            .map(|(name, _)| name.clone())
+            .collect();
+        button_dialog::open(&self.window, title, initial, &bases, self.app.current_kind(), accept);
     }
 
     // ------------------------------------------------------------ reordering

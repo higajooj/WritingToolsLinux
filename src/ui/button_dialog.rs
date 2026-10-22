@@ -24,6 +24,10 @@ pub struct ButtonData {
     pub provider: Option<String>,
     /// `None` for the model set for the provider in Settings.
     pub model: Option<String>,
+    /// A reusable base action rather than a button.
+    pub is_base: bool,
+    /// Name of the base action to build on.
+    pub base: Option<String>,
 }
 
 /// Modifier-insensitive identity of a shortcut, so `Ctrl+J` and `control+j` match.
@@ -80,7 +84,7 @@ pub fn validate_hotkey(
         ));
     }
     for (name, entry) in options {
-        if Some(name.as_str()) == current {
+        if Some(name.as_str()) == current || entry.is_base {
             continue;
         }
         if let Some(other) = entry.hotkey.as_deref().map(str::trim).filter(|h| !h.is_empty())
@@ -92,6 +96,21 @@ pub fn validate_hotkey(
     Ok(())
 }
 
+/// Names of the buttons built on the base action `base`, in display order.
+pub fn dependents<'a>(options: &'a Options, base: &str) -> Vec<&'a str> {
+    options.iter().filter(|(_, entry)| entry.base.as_deref() == Some(base)).map(|(name, _)| name.as_str()).collect()
+}
+
+/// A base action other buttons build on must stay one.
+pub fn validate_base(data: &ButtonData, options: &Options, current: Option<&str>) -> Result<(), String> {
+    let Some(current) = current.filter(|_| !data.is_base) else { return Ok(()) };
+    let users = dependents(options, current);
+    if users.is_empty() {
+        return Ok(());
+    }
+    Err(format!("'{current}' is the base action of {}. Pick a different base for them first.", users.join(", ")))
+}
+
 /// The options.json entry for dialog output. Other fields of an existing
 /// entry (including its prefix and icon) are kept.
 pub fn build_entry(data: &ButtonData, existing: Option<&OptionEntry>) -> OptionEntry {
@@ -101,25 +120,41 @@ pub fn build_entry(data: &ButtonData, existing: Option<&OptionEntry>) -> OptionE
         ..Default::default()
     });
     entry.instruction = data.instruction.clone();
-    entry.open_in_window = data.open_in_window;
-    entry.hotkey = data.hotkey.clone();
-    entry.provider = data.provider.clone();
-    entry.model = data.model.clone();
+    entry.is_base = data.is_base;
+    // A base only lends its instruction; the rest belongs to buttons.
+    if data.is_base {
+        entry.open_in_window = false;
+        entry.hotkey = None;
+        entry.provider = None;
+        entry.model = None;
+        entry.base = None;
+    } else {
+        entry.open_in_window = data.open_in_window;
+        entry.hotkey = data.hotkey.clone();
+        entry.provider = data.provider.clone();
+        entry.model = data.model.clone();
+        entry.base = data.base.clone();
+    }
     entry
 }
 
 /// Apply an add (`current == None`) or edit to a copy of `options`. A renamed
-/// button keeps its position.
+/// button keeps its position, and a renamed base stays the base of its buttons.
 pub fn apply(options: &Options, current: Option<&str>, data: &ButtonData) -> Options {
     let entry = build_entry(data, current.and_then(|name| options.get(name)));
     match current {
         Some(current) => options
             .iter()
-            .map(
-                |(name, value)| {
-                    if name == current { (data.name.clone(), entry.clone()) } else { (name.clone(), value.clone()) }
-                },
-            )
+            .map(|(name, value)| {
+                if name == current {
+                    return (data.name.clone(), entry.clone());
+                }
+                let mut value = value.clone();
+                if value.base.as_deref() == Some(current) {
+                    value.base = Some(data.name.clone());
+                }
+                (name.clone(), value)
+            })
             .collect(),
         None => {
             let mut updated = options.clone();
@@ -147,12 +182,18 @@ fn heading(text: &str) -> gtk::Label {
     label
 }
 
-/// Show the dialog. `default_provider` names the provider used by buttons
-/// that do not choose one. `accept` returns an error message to keep it open.
+const INSTRUCTION_HEADING: &str = "What should your AI do with your selected text? (System Instruction)";
+const BASE_INSTRUCTION_HEADING: &str =
+    "What should every button built on this base follow? (Comes before their own System Instruction)";
+
+/// Show the dialog. `bases` names the base actions a button can build on and
+/// `default_provider` the provider used by buttons that do not choose one.
+/// `accept` returns an error message to keep it open.
 pub fn open(
     parent: &gtk::Window,
     title: &str,
     initial: Option<(&str, &OptionEntry)>,
+    bases: &[String],
     default_provider: ProviderKind,
     accept: impl Fn(ButtonData) -> Result<(), (String, String)> + 'static,
 ) {
@@ -174,6 +215,20 @@ pub fn open(
     content.append(&heading("Button Name:"));
     content.append(&name);
 
+    let is_base =
+        gtk::CheckButton::with_label("Reusable base action (not shown as a button; other buttons can build on it)");
+    content.append(&is_base);
+
+    // Only buttons build on a base, and only when there is one to pick.
+    let base_section = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    base_section.append(&heading("Base action (optional):"));
+    let mut base_names = vec!["None"];
+    base_names.extend(bases.iter().map(String::as_str));
+    let base = gtk::DropDown::from_strings(&base_names);
+    base.set_halign(gtk::Align::Start);
+    base_section.append(&base);
+    content.append(&base_section);
+
     let instruction = gtk::TextView::builder().wrap_mode(gtk::WrapMode::WordChar).accepts_tab(false).build();
     instruction.add_css_class("card-textview");
     let placeholder = gtk::Label::new(Some(INSTRUCTION_EXAMPLES));
@@ -193,21 +248,26 @@ pub fn open(
         let placeholder = placeholder.clone();
         move |buffer| placeholder.set_visible(buffer.char_count() == 0)
     });
-    content.append(&heading("What should your AI do with your selected text? (System Instruction)"));
+    let instruction_heading = heading(INSTRUCTION_HEADING);
+    content.append(&instruction_heading);
     content.append(&instruction_overlay);
 
-    content.append(&heading("How should your AI response be shown?"));
+    // Everything below only applies to buttons, not base actions.
+    let button_section = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    content.append(&button_section);
+
+    button_section.append(&heading("How should your AI response be shown?"));
     let clipboard = gtk::CheckButton::with_label("Copy to clipboard");
     let window = gtk::CheckButton::with_label("In a pop-up window (with follow-up support)");
     window.set_group(Some(&clipboard));
     let radios = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     radios.append(&clipboard);
     radios.append(&window);
-    content.append(&radios);
+    button_section.append(&radios);
 
-    content.append(&heading("Popup shortcut (optional):"));
+    button_section.append(&heading("Popup shortcut (optional):"));
     let hotkey = gtk::Entry::builder().placeholder_text("e.g. ctrl+j  (leave blank for none)").build();
-    content.append(&hotkey);
+    button_section.append(&hotkey);
     let hint = gtk::Label::new(Some(
         "Open Writing Tools, then press this combination while its popup is active to run this button immediately.\nUse '+' between keys, e.g. ctrl+j or ctrl+shift+p.",
     ));
@@ -215,9 +275,9 @@ pub fn open(
     hint.set_xalign(0.0);
     hint.add_css_class("dim-label");
     hint.add_css_class("caption");
-    content.append(&hint);
+    button_section.append(&hint);
 
-    content.append(&heading("AI provider and model (optional):"));
+    button_section.append(&heading("AI provider and model (optional):"));
     let default_label = format!("Default ({})", default_provider.name());
     let mut providers = vec![default_label.as_str()];
     providers.extend(ProviderKind::ALL.iter().map(|kind| kind.name()));
@@ -239,7 +299,7 @@ pub fn open(
     let provider_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     provider_row.append(&provider);
     provider_row.append(&model);
-    content.append(&provider_row);
+    button_section.append(&provider_row);
 
     match initial {
         Some((initial_name, entry)) => {
@@ -248,6 +308,10 @@ pub fn open(
             window.set_active(entry.open_in_window);
             clipboard.set_active(!entry.open_in_window);
             hotkey.set_text(entry.hotkey.as_deref().unwrap_or_default());
+            is_base.set_active(entry.is_base);
+            if let Some(index) = entry.base.as_deref().and_then(|name| bases.iter().position(|b| b == name)) {
+                base.set_selected(index as u32 + 1);
+            }
             let kind = entry.provider.as_deref().and_then(ProviderKind::from_name);
             if let Some(index) = kind.and_then(|kind| ProviderKind::ALL.iter().position(|k| *k == kind)) {
                 provider.set_selected(index as u32 + 1);
@@ -258,6 +322,19 @@ pub fn open(
     }
     placeholder.set_visible(buffer.char_count() == 0);
     update_model(&provider);
+    let update_kind = {
+        let has_bases = !bases.is_empty();
+        let base_section = base_section.clone();
+        let button_section = button_section.clone();
+        move |is_base: &gtk::CheckButton| {
+            let button = !is_base.is_active();
+            base_section.set_visible(button && has_bases);
+            button_section.set_visible(button);
+            instruction_heading.set_label(if button { INSTRUCTION_HEADING } else { BASE_INSTRUCTION_HEADING });
+        }
+    };
+    is_base.connect_toggled(update_kind.clone());
+    update_kind(&is_base);
 
     let cancel = gtk::Button::with_label("Cancel");
     let ok = gtk::Button::with_label("OK");
@@ -285,6 +362,7 @@ pub fn open(
     });
     ok.connect_clicked({
         let dialog = dialog.downgrade();
+        let bases = bases.to_vec();
         move |_| {
             let Some(dialog) = dialog.upgrade() else { return };
             let hotkey = hotkey.text().trim().to_lowercase();
@@ -298,6 +376,9 @@ pub fn open(
                 hotkey: (!hotkey.is_empty()).then_some(hotkey),
                 provider: kind.map(|kind| kind.name().to_owned()),
                 model: kind.filter(|_| !model.is_empty()).map(|_| model),
+                is_base: is_base.is_active(),
+                // Position 0 is no base.
+                base: (base.selected() as usize).checked_sub(1).and_then(|i| bases.get(i)).cloned(),
             };
             // A rejected entry keeps the dialog open with the user's input.
             match accept(data) {
@@ -386,6 +467,7 @@ mod tests {
             hotkey: Some("ctrl+9".into()),
             provider: Some("OpenRouter".into()),
             model: Some("x/y".into()),
+            ..Default::default()
         };
         let added = apply(&options, None, &data);
         let entry = &added["Shout"];
@@ -411,5 +493,42 @@ mod tests {
         assert_eq!((entry.provider.as_deref(), entry.model.as_deref()), (None, None));
         assert_eq!(entry.extra["future"], 1);
         assert!(!edited.contains_key("Rewrite"));
+    }
+
+    #[test]
+    fn base_actions() {
+        let mut options = options();
+        let base = ButtonData { name: "Style".into(), instruction: "No em-dashes.".into(), ..Default::default() };
+        options = apply(&options, None, &ButtonData { is_base: true, ..base.clone() });
+        options.get_mut("Rewrite").unwrap().base = Some("Style".into());
+        assert_eq!(dependents(&options, "Style"), ["Rewrite"]);
+
+        // A base never keeps a button's settings.
+        let entry = build_entry(
+            &ButtonData {
+                is_base: true,
+                open_in_window: true,
+                hotkey: Some("ctrl+9".into()),
+                provider: Some("OpenRouter".into()),
+                model: Some("x/y".into()),
+                base: Some("Other".into()),
+                ..base.clone()
+            },
+            None,
+        );
+        assert!(entry.is_base && !entry.open_in_window);
+        assert_eq!((entry.hotkey, entry.provider, entry.model, entry.base), (None, None, None, None));
+
+        // Its buttons follow a rename, and it can't stop being a base while used.
+        let renamed =
+            apply(&options, Some("Style"), &ButtonData { name: "Tone".into(), is_base: true, ..base.clone() });
+        assert_eq!(renamed["Rewrite"].base.as_deref(), Some("Tone"));
+        assert!(validate_base(&ButtonData { is_base: true, ..base.clone() }, &options, Some("Style")).is_ok());
+        assert!(validate_base(&base, &options, None).is_ok());
+        assert!(validate_base(&base, &options, Some("Style")).unwrap_err().contains("base action of Rewrite"));
+
+        // Base actions bind no shortcut, so theirs can't conflict.
+        options.get_mut("Style").unwrap().hotkey = Some("ctrl+8".into());
+        assert!(validate_hotkey(Some("ctrl+8"), &options, "ctrl+space", None).is_ok());
     }
 }

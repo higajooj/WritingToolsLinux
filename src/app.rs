@@ -381,7 +381,8 @@ impl App {
                 show_message(None::<&gtk::Widget>, "Error", "Choose an AI provider in Settings first.");
                 return;
             };
-            let system = prompt::build_system_instruction(&name, &option, extra.as_deref());
+            let base = options::base_instruction(&app.options.borrow(), &option).map(str::to_owned);
+            let system = prompt::build_system_instruction(&name, &option, base.as_deref(), extra.as_deref());
             let user_prompt = prompt::build_option_prompt(&name, &option, &text, extra.as_deref());
             let record = app.record_history(&name, &text, extra.as_deref());
 

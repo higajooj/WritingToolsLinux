@@ -29,6 +29,13 @@ pub struct OptionEntry {
     /// Model to use instead of the one set for the provider in Settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// A reusable base: not shown as a button, its instruction is added to
+    /// the buttons that name it as their `base`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_base: bool,
+    /// Name of the base action whose instruction comes before this one's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
     /// Fields written by other versions are kept as they are.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -39,6 +46,14 @@ pub type Options = IndexMap<String, OptionEntry>;
 
 pub fn defaults() -> Options {
     serde_json::from_str(DEFAULT_OPTIONS).expect("bundled default_options.json is valid")
+}
+
+/// The instruction of `entry`'s base action. A base that no longer exists,
+/// is no longer a base, or is empty is ignored.
+pub fn base_instruction<'a>(options: &'a Options, entry: &OptionEntry) -> Option<&'a str> {
+    let base = options.get(entry.base.as_deref()?)?;
+    let instruction = base.instruction.trim();
+    (base.is_base && !instruction.is_empty()).then_some(instruction)
 }
 
 /// Load user options, seeding them from the bundled defaults if absent.
@@ -99,6 +114,25 @@ mod tests {
         assert!(text.contains(r#""future":1"#));
         assert!(!text.contains("hotkey"));
         assert!(!text.contains("provider") && !text.contains("model"));
+        assert!(!text.contains("is_base") && !text.contains("base"));
+    }
+
+    #[test]
+    fn base_round_trips_and_resolves() {
+        let mut parsed: Options = serde_json::from_str(
+            r#"{"B": {"instruction": " No em-dashes. ", "is_base": true}, "A": {"instruction": "i", "base": "B"}}"#,
+        )
+        .unwrap();
+        assert!(parsed["A"].extra.is_empty() && parsed["B"].extra.is_empty());
+        let text = serde_json::to_string(&parsed).unwrap();
+        assert!(text.contains(r#""is_base":true"#) && text.contains(r#""base":"B""#));
+        assert_eq!(base_instruction(&parsed, &parsed["A"]), Some("No em-dashes."));
+        assert_eq!(base_instruction(&parsed, &parsed["B"]), None);
+
+        parsed.get_mut("B").unwrap().is_base = false;
+        assert_eq!(base_instruction(&parsed, &parsed["A"]), None);
+        parsed.shift_remove("B");
+        assert_eq!(base_instruction(&parsed, &parsed["A"]), None);
     }
 
     #[test]
